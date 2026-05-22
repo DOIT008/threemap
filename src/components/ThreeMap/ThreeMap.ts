@@ -5,7 +5,7 @@ import { CSS2DRenderer } from "three/examples/jsm/renderers/CSS2DRenderer.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 
-import { drawDistrict, districtRender, districtAnimate } from "./utils/drawDistrict";
+import { drawDistrict, districtRender, districtAnimate, updateDistrictMaterials } from "./utils/drawDistrict";
 import { drawOutline } from "./utils/drawOutLine";
 import { drawGlow } from "./utils/drawGlow";
 import { drawMirror, drawGradientPlane } from "./utils/drawPlane";
@@ -82,12 +82,16 @@ export default class ThreeMap {
 
   resizeObserver: ResizeObserver | null;
   _cancelRealShape: (() => void) | null;
+  lastGeometryKey: string | null;
+  seriesKeyMap: Map<string, string>;
 
   options: ThreeMapOptions | null;
   mapKey: string;
   mapUf: MapUniform | undefined;
   pickDistrictMesh: THREE.Intersection | null;
   uvScale?: THREE.Vector2;
+  boundaryFeatures: GeoJsonFeatureCollection["features"] | null;
+  lastWallKey: string | null;
 
   /**
    * ThreeMap 核心实例构造：初始化场景、渲染器、交互控制器和鼠标事件。
@@ -142,6 +146,10 @@ export default class ThreeMap {
     this.raycaster = null;
     this.resizeObserver = null;
     this._cancelRealShape = null;
+    this.lastGeometryKey = null;
+    this.seriesKeyMap = new Map();
+    this.boundaryFeatures = null;
+    this.lastWallKey = null;
 
     const onPointerMove = (mouseEvent: MouseEvent): void => {
       this.pointer!.x = (mouseEvent.offsetX / this.innerWidth) * 2 - 1;
@@ -152,7 +160,7 @@ export default class ThreeMap {
 
     const onPointerClick = (e: MouseEvent): void => {
       e.stopPropagation();
-      e.preventDefault();
+    
       const { raycaster, scene } = this;
       if (!raycaster || !scene) return;
       const intersects = raycaster.intersectObjects(scene.children, true);
@@ -173,7 +181,6 @@ export default class ThreeMap {
 
     const onDblClick = (e: MouseEvent): void => {
       e.stopPropagation();
-      e.preventDefault();
       const { raycaster, scene } = this;
       if (!raycaster || !scene) return;
       const intersects = raycaster.intersectObjects(scene.children, true);
@@ -213,6 +220,19 @@ export default class ThreeMap {
    * 设置配置项
    */
   setOption(options: ThreeMapOptions, refresh = true): void {
+    const geometryKey = this.getGeometryKey(options);
+    const canUpdateMaterials = this.options && this.lastGeometryKey === geometryKey && this.seriesGroup && this.seriesGroup.children.length > 0;
+    if (canUpdateMaterials) {
+      this.options = options;
+      updateDistrictMaterials.call(this as any, options.data, options);
+      this.updateOutlineLayers(options);
+      this.updateEnvironment(options);
+      this.updateControls(options);
+      this.addTooltipLayer();
+      this.updateSeriesLayers(options);
+      return;
+    }
+
     this.mapKey = uuid();
     this.clearMap();
     this.isClear = false;
@@ -221,6 +241,8 @@ export default class ThreeMap {
     this.environmentGroup = new THREE.Group();
     this.scene!.add(this.environmentGroup);
     this.options = options;
+    this.lastGeometryKey = geometryKey;
+    this.seriesKeyMap = new Map();
 
     const code = options.map + "";
     const camera = options.camera;
@@ -250,6 +272,7 @@ export default class ThreeMap {
     if (this.registerList.get(code)) {
       const [boundary, full, projection] = this.registerList.get(code)!;
       this.refresh = refresh;
+      this.boundaryFeatures = boundary.features;
 
       if (refresh) {
         this.projection = projection;
@@ -277,6 +300,7 @@ export default class ThreeMap {
 
       this.drawDistrictArea(options.data, full.features, options);
       this.drawDistrictOutline(boundary.features, options);
+      this.lastWallKey = `${options.wall.show}|${options.wall.height}|${options.wall.color}`;
 
       const series = options.series;
       series.forEach((item) => {
@@ -297,10 +321,246 @@ export default class ThreeMap {
             this.addCylinderLayer(item as CylinderSeriesOptions);
             break;
         }
+        const seriesId = this.getSeriesId(item);
+        this.seriesKeyMap.set(seriesId, this.getSeriesKey(item));
       });
     } else {
       throw Error("请先注册地图: " + code);
     }
+  }
+
+  /**
+   * 更新电子围栏（wall）图层，不重建地图块。
+   */
+  updateOutlineLayers(options: ThreeMapOptions): void {
+    if (!this.seriesGroup || !this.boundaryFeatures) return;
+
+    const wallKey = `${options.wall.show}|${options.wall.height}|${options.wall.color}`;
+    if (this.lastWallKey === wallKey) return;
+
+    const removeWallGroup = (): void => {
+      const targets: THREE.Object3D[] = [];
+      this.seriesGroup.children.forEach((child: any) => {
+        if (child?._category === "wall") {
+          targets.push(child);
+        }
+      });
+
+      const disposeObject = (obj: any): void => {
+        if (!obj) return;
+        if (obj.geometry) {
+          obj.geometry.dispose();
+        }
+        if (obj.material) {
+          if (Array.isArray(obj.material)) {
+            obj.material.forEach((m: any) => {
+              m.map?.dispose();
+              m.dispose?.();
+            });
+          } else {
+            obj.material.map?.dispose();
+            obj.material.dispose?.();
+          }
+        }
+      };
+
+      targets.forEach((target) => {
+        target.traverse((obj: any) => {
+          disposeObject(obj);
+        });
+        this.seriesGroup.remove(target);
+      });
+    };
+
+    removeWallGroup();
+
+    if (options.wall.show) {
+      const { drawWall } = drawOutline.call(this as any, this.boundaryFeatures, options, options.config);
+      drawWall().then((group) => {
+        (group as any)._category = "wall";
+        this.seriesGroup && this.seriesGroup.add(group);
+      });
+    }
+
+    this.lastWallKey = wallKey;
+  }
+
+  /**
+   * 更新环境层（网格/底座/镜面/辉光），不影响地图块与 series。
+   */
+  updateEnvironment(options: ThreeMapOptions): void {
+    if (!this.environmentGroup) return;
+
+    const disposeObject = (obj: any): void => {
+      if (!obj) return;
+      if (obj.geometry) {
+        obj.geometry.dispose();
+      }
+      if (obj.material) {
+        if (Array.isArray(obj.material)) {
+          obj.material.forEach((m: any) => {
+            m.map?.dispose();
+            m.dispose?.();
+          });
+        } else {
+          obj.material.map?.dispose();
+          obj.material.dispose?.();
+        }
+      }
+    };
+
+    this.environmentGroup.traverse(disposeObject);
+    if (this.environmentGroup.children.length) {
+      this.environmentGroup.children = [];
+    }
+
+    const bloomComposer = this.bloomComposer as any;
+    if (bloomComposer && typeof bloomComposer.dispose === "function") {
+      bloomComposer.dispose();
+    }
+    const finalComposer = this.finalComposer as any;
+    if (finalComposer && typeof finalComposer.dispose === "function") {
+      finalComposer.dispose();
+    }
+    this.bloomComposer = null;
+    this.finalComposer = null;
+
+    this.setEnvironment(options);
+    this.setFoundation(options);
+  }
+
+  /**
+   * 更新控制器参数。
+   */
+  updateControls(options: ThreeMapOptions): void {
+    const { autoRotate, config } = options;
+    const { disableRotate = false, disableZoom = false } = config;
+
+    if (autoRotate && this.controls) {
+      this.controls.autoRotate = autoRotate.autoRotate;
+      this.controls.autoRotateSpeed = autoRotate.autoRotateSpeed;
+    }
+    if (this.controls) {
+      this.controls.enableRotate = !disableRotate;
+      this.controls.enableZoom = !disableZoom;
+    }
+  }
+
+  /**
+   * 提取会影响几何或场景结构的配置快照。
+   */
+  getGeometryKey(options: ThreeMapOptions): string {
+    return `${options.map}|${options.config.depth}|${options.config.scale}`;
+  }
+
+  /**
+   * 提取 series 的稳定 id 和快照 key。
+   */
+  getSeriesId(series: ThreeMapOptions["series"][number]): string {
+    return `${series.type}:${series.seriesName}`;
+  }
+
+  getSeriesKey(series: ThreeMapOptions["series"][number]): string {
+    return JSON.stringify(series);
+  }
+
+  /**
+   * 按需更新 series，未变化的 series 复用现有对象。
+   */
+  updateSeriesLayers(options: ThreeMapOptions): void {
+    if (!this.seriesGroup) return;
+
+    const nextSeriesKeyMap = new Map<string, string>();
+    const nextSeriesIdSet = new Set<string>();
+
+    options.series.forEach((series) => {
+      const id = this.getSeriesId(series);
+      const key = this.getSeriesKey(series);
+      nextSeriesKeyMap.set(id, key);
+      nextSeriesIdSet.add(id);
+    });
+
+    // 移除已删除的 series
+    const removedIds = new Set<string>();
+    this.seriesGroup.children.forEach((child: any) => {
+      const id = child?._seriesId;
+      if (id && !nextSeriesIdSet.has(id)) {
+        removedIds.add(id);
+      }
+    });
+    removedIds.forEach((id) => this.removeSeriesGroup(id));
+
+    // 更新变更的 series
+    options.series.forEach((series) => {
+      const id = this.getSeriesId(series);
+      const key = this.getSeriesKey(series);
+      const prevKey = this.seriesKeyMap.get(id);
+
+      if (prevKey !== key) {
+        this.removeSeriesGroup(id);
+        switch (series.type) {
+          case "marker":
+            this.addMarkerLayer(series as MarkerSeriesOptions);
+            break;
+          case "prism":
+            this.addPrismLayer(series as PrismSeriesOptions);
+            break;
+          case "flight":
+            this.addLinkLayer(series as FlightSeriesOptions);
+            break;
+          case "scatter":
+            this.addSCatterLayer(series as ScatterSeriesOptions);
+            break;
+          case "cylinder":
+            this.addCylinderLayer(series as CylinderSeriesOptions);
+            break;
+        }
+      }
+    });
+
+    this.seriesKeyMap = nextSeriesKeyMap;
+  }
+
+  /**
+   * 移除并释放指定 series 的所有对象。
+   */
+  removeSeriesGroup(seriesId: string): void {
+    if (!this.seriesGroup) return;
+
+    const removeTargets: THREE.Object3D[] = [];
+    this.seriesGroup.children.forEach((child: any) => {
+      if (child?._seriesId === seriesId) {
+        removeTargets.push(child);
+      }
+    });
+
+    const disposeObject = (obj: any): void => {
+      if (!obj) return;
+      if (obj.geometry) {
+        obj.geometry.dispose();
+      }
+      if (obj.material) {
+        if (Array.isArray(obj.material)) {
+          obj.material.forEach((m: any) => {
+            m.map?.dispose();
+            m.dispose?.();
+          });
+        } else {
+          obj.material.map?.dispose();
+          obj.material.dispose?.();
+        }
+      }
+    };
+
+    removeTargets.forEach((target) => {
+      target.traverse((obj: any) => {
+        disposeObject(obj);
+        if (["label", "marker", "prism", "scatter"].includes(obj._type)) {
+          obj.element?.remove();
+        }
+      });
+      this.seriesGroup.remove(target);
+    });
   }
 
   /**
@@ -626,6 +886,7 @@ export default class ThreeMap {
   addMarkerLayer(options: MarkerSeriesOptions): void {
     const config = this.options!.config;
     const markerGroup = drawMarker.call(this as any, options, config);
+    (markerGroup as any)._seriesId = this.getSeriesId(options);
     this.seriesGroup.add(markerGroup);
   }
 
@@ -635,6 +896,7 @@ export default class ThreeMap {
   addPrismLayer(options: PrismSeriesOptions): void {
     const config = this.options!.config;
     const prismsGroup = drawPrism.call(this as any, options, config);
+    (prismsGroup as any)._seriesId = this.getSeriesId(options);
     this.seriesGroup.add(prismsGroup);
   }
 
@@ -644,6 +906,7 @@ export default class ThreeMap {
   addLinkLayer(options: FlightSeriesOptions): void {
     const config = this.options!.config;
     const group = drawFlight.call(this as any, options, config);
+    (group as any)._seriesId = this.getSeriesId(options);
     this.seriesGroup.add(group);
   }
 
@@ -653,6 +916,7 @@ export default class ThreeMap {
   addCylinderLayer(options: CylinderSeriesOptions): void {
     const config = this.options!.config;
     const cylinderGroup = drawCylinder.call(this as any, options, config);
+    (cylinderGroup as any)._seriesId = this.getSeriesId(options);
     this.seriesGroup.add(cylinderGroup);
   }
 
@@ -662,6 +926,7 @@ export default class ThreeMap {
   addSCatterLayer(options: ScatterSeriesOptions): void {
     const config = this.options!.config;
     const scatterGroup = drawScatter.call(this as any, options, config);
+    (scatterGroup as any)._seriesId = this.getSeriesId(options);
     this.seriesGroup.add(scatterGroup);
   }
 

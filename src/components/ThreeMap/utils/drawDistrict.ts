@@ -371,14 +371,10 @@ export const drawDistrict = function (this: ThreeMapContext, data: DataItem[], o
           textStyle: options.label.itemStyle.textStyle, // 标签样式
         };
 
-        // 如果启用 emphasis （鼠标悬停高亮），存储高亮配置
-        if (emphasis.show) {
-          _privateData["emphasisColor"] = emphasis.topColor; // hover 时的颜色
-          _privateData["emphasisText"] = emphasis.textStyle; // hover 时的文字样式
-        } else {
-          Reflect.deleteProperty(_privateData, "emphasisColor");
-          Reflect.deleteProperty(_privateData, "emphasisText");
-        }
+        // 缓存 emphasis 配置，显示与否由 emphasisEnabled 控制
+        _privateData["emphasisColor"] = emphasis.topColor; // hover 时的颜色
+        _privateData["emphasisText"] = emphasis.textStyle; // hover 时的文字样式
+        _privateData["emphasisEnabled"] = emphasis.show;
 
         // 将数据收集到 shapeData，用于延迟创建 ExtrudeGeometry
         shapeData.push({
@@ -512,6 +508,187 @@ export const drawDistrict = function (this: ThreeMapContext, data: DataItem[], o
 };
 
 /**
+ * 更新区域材质与纹理（不重新构建几何体）
+ */
+export const updateDistrictMaterials = function (this: ThreeMapContext, data: DataItem[], options: ThreeMapOptions): void {
+  if (!this.seriesGroup) return;
+
+  const { itemStyle, lineStyle, outLineStyle, emphasis, texture, label } = options;
+  const range = itemStyle.range;
+
+  let sc: string | null = null;
+  let ec: string | null = null;
+  let min = Number.MIN_SAFE_INTEGER;
+  let max = Number.MAX_SAFE_INTEGER;
+  if (range.show) {
+    sc = range.color[0]!;
+    ec = range.color[1]!;
+    min = range.min;
+    max = range.max;
+  }
+
+  const dataMap = new Map<string, DataItem>();
+  data.forEach((it) => {
+    if (sc != null && ec != null) {
+      const value = it.value;
+      let color: string;
+      if (range.mode === "separate") {
+        color = separateColor(value!, range.rules, ec);
+      } else {
+        color = rangeColor(sc, ec, min, max, value);
+      }
+      it.color = color;
+    } else {
+      it.color = null;
+    }
+    dataMap.set(it.district + "", it);
+  });
+
+  const lineFormat = tinycolor(lineStyle.color);
+  const lineRgb = lineFormat.toRgb();
+  const lineOpacity = lineFormat.getAlpha();
+  const nextLineColor = `rgb(${lineRgb.r},${lineRgb.g},${lineRgb.b})`;
+
+  const outlineFormat = tinycolor(outLineStyle.color);
+  const outlineRgb = outlineFormat.toRgb();
+  const outlineOpacity = outlineFormat.getAlpha();
+  const nextOutlineColor = `rgb(${outlineRgb.r},${outlineRgb.g},${outlineRgb.b})`;
+
+  const sideFormat = tinycolor(itemStyle.sideColor);
+  const sideRgb = sideFormat.toRgb();
+  const sideOpacity = sideFormat.getAlpha();
+  const nextSideColor = `rgb(${sideRgb.r},${sideRgb.g},${sideRgb.b})`;
+
+  if (this.mapUf) {
+    this.mapUf.uColor.value = new THREE.Color(itemStyle.uColor);
+  }
+
+  const textureTargets: THREE.MeshBasicMaterial[] = [];
+  const materialToDispose = new Set<THREE.Texture>();
+
+  const applyTopMaterial = (material: THREE.MeshBasicMaterial, color: string): void => {
+    const polygonFormat = tinycolor(color);
+    const { r, g, b } = polygonFormat.toRgb();
+    material.color.set(`rgb(${r},${g},${b})`);
+    material.opacity = polygonFormat.getAlpha();
+  };
+
+  this.seriesGroup.traverse((obj: any) => {
+    if (obj._type === "district") {
+      const item = dataMap.get(obj._privateData?.adcode + "");
+      const topColor = item && item.color ? item.color : itemStyle.topColor;
+      applyTopMaterial(obj.material[0], topColor);
+
+      obj.material[1].color.set(nextSideColor);
+      obj.material[1].opacity = sideOpacity;
+
+      obj._privateData.deriveColor = topColor;
+      obj._privateData.textStyle = label.itemStyle.textStyle;
+      obj._privateData.emphasisColor = emphasis.topColor;
+      obj._privateData.emphasisText = emphasis.textStyle;
+      obj._privateData.emphasisEnabled = emphasis.show;
+
+      if (obj._label) {
+        (obj._label as HTMLElement).style.display = label.show ? "" : "none";
+      }
+
+      textureTargets.push(obj.material[0]);
+    } else if (obj._type === "shape_district") {
+      const item = dataMap.get(obj._privateData?.adcode + "");
+      const topColor = item && item.color ? item.color : itemStyle.topColor;
+      applyTopMaterial(obj.material, topColor);
+
+      obj._privateData.deriveColor = topColor;
+      obj._privateData.textStyle = label.itemStyle.textStyle;
+      obj._privateData.emphasisColor = emphasis.topColor;
+      obj._privateData.emphasisText = emphasis.textStyle;
+      obj._privateData.emphasisEnabled = emphasis.show;
+
+      if (obj._label) {
+        (obj._label as HTMLElement).style.display = label.show ? "" : "none";
+      }
+
+      textureTargets.push(obj.material);
+    } else if (obj._type === "districtLine") {
+      obj.material.color.set(nextLineColor);
+      obj.material.opacity = lineOpacity;
+      obj.material.needsUpdate = true;
+    } else if (obj._type === "label" && obj._isDistrict) {
+      obj.visible = label.show;
+      if (obj.element) {
+        obj.element.style.display = label.show ? "" : "none";
+      }
+    } else if (obj._isGlow && obj.material && obj.material.isLineBasicMaterial) {
+      obj.material.color.set(nextOutlineColor);
+      obj.material.opacity = outlineOpacity;
+      obj.material.needsUpdate = true;
+    }
+  });
+
+  if (texture && texture.show) {
+    let mapTexture: THREE.Texture | null = null;
+    let scaleX = 1;
+    let scaleY = 1;
+
+    if (texture.image !== "default") {
+      mapTexture = new THREE.TextureLoader().load(texture.image);
+    } else {
+      mapTexture = staticTexture;
+    }
+
+    if (texture.autoRepeat) {
+      const { x, y } = texture.repeat;
+      scaleX = x;
+      scaleY = y;
+    } else {
+      let uvScale = this.uvScale;
+      if (!uvScale) {
+        const box = new THREE.Box3();
+        let hasDistrict = false;
+        this.seriesGroup.traverse((obj: any) => {
+          if (obj._type === "district" || obj._type === "shape_district") {
+            box.expandByObject(obj);
+            hasDistrict = true;
+          }
+        });
+        if (hasDistrict) {
+          uvScale = new THREE.Vector2(1 / (box.max.x - box.min.x), 1 / (box.max.z - box.min.z));
+          this.uvScale = uvScale;
+        }
+      }
+      if (uvScale) {
+        scaleX = uvScale.x;
+        scaleY = uvScale.y;
+      }
+    }
+
+    mapTexture.flipY = true;
+    mapTexture.wrapS = THREE.RepeatWrapping;
+    mapTexture.wrapT = THREE.RepeatWrapping;
+    mapTexture.repeat.set(scaleX, scaleY);
+    mapTexture.offset.set(texture.offset.x, texture.offset.y);
+
+    textureTargets.forEach((material) => {
+      if (material.map && material.map !== mapTexture && material.map !== staticTexture) {
+        materialToDispose.add(material.map);
+      }
+      material.map = mapTexture;
+      material.needsUpdate = true;
+    });
+  } else {
+    textureTargets.forEach((material) => {
+      if (material.map && material.map !== staticTexture) {
+        materialToDispose.add(material.map);
+      }
+      material.map = null;
+      material.needsUpdate = true;
+    });
+  }
+
+  materialToDispose.forEach((tex) => tex.dispose());
+};
+
+/**
  * 侧边动画
  */
 export const districtAnimate = function (this: ThreeMapContext, mapUf: MapUniform | undefined): boolean | void {
@@ -561,9 +738,11 @@ export const districtRender = function (this: ThreeMapContext): void {
     const mesh = this.pickDistrictMesh.object as any;
     mesh.material[0]._opacity = mesh.material[0].opacity;
 
-    const { emphasisColor, emphasisText } = mesh._privateData;
-    emphasisColor && mesh.material[0].color.set(emphasisColor);
-    if (emphasisText && mesh._label) {
+    const { emphasisColor, emphasisText, emphasisEnabled } = mesh._privateData;
+    if (emphasisEnabled && emphasisColor) {
+      mesh.material[0].color.set(emphasisColor);
+    }
+    if (emphasisEnabled && emphasisText && mesh._label) {
       const ele = mesh._label as HTMLElement;
       Object.keys(emphasisText).forEach((key: string) => {
         if (isNumber(emphasisText[key])) {
@@ -592,45 +771,45 @@ function drawDistrictName(
   const projection = this.projection;
   let center = properties.centroid || properties.center;
 
-  if (options.show) {
-    if (!Array.isArray(center)) {
-      center = centerOfMass(feature).geometry.coordinates;
-    }
-    const [x, y] = projection(center as [number, number]);
-    const label = drawLabel(options, { ...properties, ...data });
+  if (!Array.isArray(center)) {
+    center = centerOfMass(feature).geometry.coordinates;
+  }
+  const [x, y] = projection(center as [number, number]);
+  const label = drawLabel(options, { ...properties, ...data });
 
-    let now = new Date().getTime();
-    let isDbl = false;
-    label.addEventListener("pointerdown", (e: PointerEvent) => {
-      e.stopPropagation();
-      e.preventDefault();
-      const clickTime = new Date().getTime();
-      if (clickTime - now < 300) {
-        isDbl = true;
-        if (this.events["dblclick"]) {
-          this.events["dblclick"].forEach((cb) => {
+  let now = new Date().getTime();
+  let isDbl = false;
+  label.addEventListener("pointerdown", (e: PointerEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    
+    const clickTime = new Date().getTime();
+    if (clickTime - now < 300) {
+      isDbl = true;
+      if (this.events["dblclick"]) {
+        this.events["dblclick"].forEach((cb) => {
+          cb(properties);
+        });
+      }
+    } else {
+      setTimeout(() => {
+        if (!isDbl && this.events["click"]) {
+          this.events["click"].forEach((cb) => {
             cb(properties);
           });
         }
-      } else {
-        setTimeout(() => {
-          if (!isDbl && this.events["click"]) {
-            this.events["click"].forEach((cb) => {
-              cb(properties);
-            });
-          }
-          isDbl = false;
-        }, 300);
-      }
-      now = clickTime;
-    });
+        isDbl = false;
+      }, 300);
+    }
+    now = clickTime;
+  });
 
-    const name = new CSS2DObject(label) as any;
-    const { depth, scale } = config;
-    const z = (depth + 1) / scale;
-    name.position.set(x, z, y);
-    name._type = "label";
-    name._isDistrict = true;
-    return name;
-  }
+  const name = new CSS2DObject(label) as any;
+  const { depth, scale } = config;
+  const z = (depth + 1) / scale;
+  name.position.set(x, z, y);
+  name._type = "label";
+  name._isDistrict = true;
+  name.visible = options.show;
+  return name;
 }

@@ -430,7 +430,7 @@ function updateColorByHex(target: "topColor" | "sideColor" | "uColor" | "outLine
   width: 300px;
   max-height: calc(100% - 24px);
   overflow: auto;
-  z-index: 12;
+  z-index: 1000;
   color: #fff;
   background: rgba(0, 0, 0, 0.5);
   border: 1px solid rgba(255, 255, 255, 0.2);
