@@ -10,8 +10,8 @@ import type { LabelOptions } from "../types";
  * label.name = '{b}: {c}'; // 显示 "北京: 100"
  * label.itemStyle.backgroundColor = 'rgba(0,0,0,0.7)';
  */
-export default function (): LabelOptions {
-  return {
+export default function (options?: LabelOptions): LabelOptions {
+  let defaultOption = {
     show: true, // 是否显示标签
     name: "{b}", // 标签文本内容，支持模板字符串
     isFormatter: false, // 是否使用自定义 formatter 函数
@@ -36,4 +36,5 @@ export default function (): LabelOptions {
       },
     },
   };
+  return { ...defaultOption, ...options };
 }

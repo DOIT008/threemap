@@ -118,7 +118,8 @@ function getRandomFeatures(mapJson: GeoJsonFeatureCollection, count = 10): GeoJs
  * - other: 生成带 value 的区域数据
  */
 function createdDataRandom(mapJson: GeoJsonFeatureCollection, type: string): any[] {
-  const features = getRandomFeatures(mapJson, 10);
+  // 每次生成的数据量与地图区域数量一致
+  const features = getRandomFeatures(mapJson,mapJson.features.length);
   if (type === "flight") {
     if (features.length < 2) return [];
     const codes: string[] = [];
@@ -160,7 +161,7 @@ function reset(): void {
   } catch (error) {
     console.log(error);
   }
-
+  // 下钻事件
   map.on("dblclick", (data: any) => {
     if (data.adcode) {
       handleInChangeMap(data.adcode + "", data.name);
