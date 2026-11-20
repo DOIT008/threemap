@@ -18,7 +18,7 @@ export default function (options?: LabelOptions): LabelOptions {
     formatter: null, // 自定义格式化函数 (data) => string
     formatterHtml: "", // 自定义 HTML 字符串（优先级高于 formatter）
     className: "", // 自定义 CSS 类名
-    offset: [0, 0], // 标签位置偏移 [x, y]（像素单位）
+    offset: [0, 0] as [number, number], // 标签位置偏移 [x, y]（像素单位）
     itemStyle: {
       padding: [0, 0, 0, 0], // 内边距 [上, 右, 下, 左]
       backgroundColor: "rgba(50,50,50,0)", // 背景颜色，默认完全透明

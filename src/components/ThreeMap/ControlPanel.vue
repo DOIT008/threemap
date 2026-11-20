@@ -15,28 +15,17 @@ const emit = defineEmits<{
   "remove-series": [index: number];
   "regenerate-series": [index: number];
   "generate-data": [];
+  export: [];
 }>();
 
 const panelOpen = ref(true);
 const basePanelOpen = ref(true);
 const seriesPanelOpen = ref(true);
 const rangePanelOpen = ref(false);
+const surfacePanelOpen = ref(false);
+const sidePanelOpen = ref(false);
+const scenePanelOpen = ref(false);
 const newSeriesType = ref<SeriesType>("marker");
-
-const topColorHex = computed({
-  get: () => colorToHex(props.options.itemStyle.topColor),
-  set: (hex: string) => updateColorByHex("topColor", hex),
-});
-
-const sideColorHex = computed({
-  get: () => colorToHex(props.options.itemStyle.sideColor),
-  set: (hex: string) => updateColorByHex("sideColor", hex),
-});
-
-const uColorHex = computed({
-  get: () => colorToHex(props.options.itemStyle.uColor),
-  set: (hex: string) => updateColorByHex("uColor", hex),
-});
 
 const lineColorHex = computed({
   get: () => colorToHex(props.options.lineStyle.color),
@@ -56,10 +45,70 @@ const wallColorHex = computed({
   set: (hex: string) => updateColorByHex("wallColor", hex),
 });
 
+const surfaceMapColorHex = computed({
+  get: () => colorToHex(props.options.surface.mapColor),
+  set: (hex: string) => {
+    props.options.surface.mapColor = hex;
+    emitApply();
+  },
+});
+
+const surfaceTintHex = computed({
+  get: () => colorToHex(props.options.surface.tintColor),
+  set: (hex: string) => {
+    props.options.surface.tintColor = hex;
+    emitApply();
+  },
+});
+
+const sideBottomHex = computed({
+  get: () => colorToHex(props.options.side.bottomColor),
+  set: (hex: string) => {
+    props.options.side.bottomColor = hex;
+    emitApply();
+  },
+});
+
+const sideTopHex = computed({
+  get: () => colorToHex(props.options.side.topColor),
+  set: (hex: string) => {
+    props.options.side.topColor = hex;
+    emitApply();
+  },
+});
+
+const sideStripeHex = computed({
+  get: () => colorToHex(props.options.side.stripeColor),
+  set: (hex: string) => {
+    props.options.side.stripeColor = hex;
+    emitApply();
+  },
+});
+
+const sideTintHex = computed({
+  get: () => colorToHex(props.options.side.tintColor),
+  set: (hex: string) => {
+    props.options.side.tintColor = hex;
+    emitApply();
+  },
+});
+
 const emphasisTopColorHex = computed({
   get: () => colorToHex(props.options.emphasis.topColor),
   set: (hex: string) => updateColorByHex("emphasisTopColor", hex),
 });
+
+/**
+ * 色阶是「按数值给每个区县上色」，只有纯色铺色模式才落得下颜色。
+ * 图片贴图模式下每个区县采样的都是同一张路网图，色阶改了也看不见 ——
+ * 所以打开色阶时顺手把纹理来源切到纯色，不然点了开关像是坏了。
+ */
+function onRangeShowChange(): void {
+  if (props.options.itemStyle.range.show && props.options.surface.mapMode === "image") {
+    props.options.surface.mapMode = "color";
+  }
+  emitApply();
+}
 
 function emitApply(): void {
   emit("apply");
@@ -188,7 +237,10 @@ function updateColorByHex(target: "topColor" | "sideColor" | "uColor" | "outLine
   <div class="three-control-panel">
     <div class="three-control-header">
       <span>控制面板</span>
-      <button class="three-btn" @click="panelOpen = !panelOpen">{{ panelOpen ? "收起" : "展开" }}</button>
+      <div class="three-control-actions">
+        <button class="three-btn" title="把当前视觉配置导出为 TS 主题文件，项目里直接传给 <ThreeMap :option>" @click="emit('export')">导出配置</button>
+        <button class="three-btn" @click="panelOpen = !panelOpen">{{ panelOpen ? "收起" : "展开" }}</button>
+      </div>
     </div>
     <div v-if="panelOpen" class="three-control-body">
       <div class="panel-group">
@@ -197,24 +249,6 @@ function updateColorByHex(target: "topColor" | "sideColor" | "uColor" | "outLine
           <span>{{ basePanelOpen ? "-" : "+" }}</span>
         </button>
         <div v-if="basePanelOpen" class="panel-group-body">
-          <div class="panel-item">
-            <span class="panel-label">区域颜色:</span>
-            <div class="color-input-group">
-              <input type="color" v-model="topColorHex" />
-            </div>
-          </div>
-          <div class="panel-item">
-            <span class="panel-label">侧边颜色:</span>
-            <div class="color-input-group">
-              <input type="color" v-model="sideColorHex" />
-            </div>
-          </div>
-          <div class="panel-item">
-            <span class="panel-label">侧边动效:</span>
-            <div class="color-input-group">
-              <input type="color" v-model="uColorHex" />
-            </div>
-          </div>
           <div class="panel-item">
             <span class="panel-label">区域边线:</span>
             <div class="color-input-group">
@@ -226,6 +260,10 @@ function updateColorByHex(target: "topColor" | "sideColor" | "uColor" | "outLine
             <div class="color-input-group">
               <input type="color" v-model="outLineColorHex" />
             </div>
+          </div>
+          <div class="panel-item toggle">
+            <span class="panel-label">轮廓描线:</span>
+            <input type="checkbox" v-model="props.options.outLineStyle.show" @change="emitApply" />
           </div>
           <div class="panel-item">
             <span class="panel-label">地图深度:</span>
@@ -248,10 +286,6 @@ function updateColorByHex(target: "topColor" | "sideColor" | "uColor" | "outLine
             <div class="color-input-group">
               <input type="color" v-model="emphasisTopColorHex" />
             </div>
-          </div>
-          <div class="panel-item toggle">
-            <span class="panel-label">开启纹理:</span>
-            <input type="checkbox" v-model="props.options.texture.show" @change="emitApply" />
           </div>
           <div class="panel-item toggle">
             <span class="panel-label">开启旋转:</span>
@@ -283,6 +317,136 @@ function updateColorByHex(target: "topColor" | "sideColor" | "uColor" | "outLine
       </div>
 
       <div class="panel-group">
+        <button class="panel-group-header" @click="surfacePanelOpen = !surfacePanelOpen">
+          <span>顶面材质</span>
+          <span>{{ surfacePanelOpen ? "-" : "+" }}</span>
+        </button>
+        <div v-if="surfacePanelOpen" class="panel-group-body">
+          <div class="panel-item">
+            <span class="panel-label">纹理来源:</span>
+            <select class="range-select" v-model="props.options.surface.mapMode" @change="emitApply">
+              <option value="image">图片贴图</option>
+              <option value="color">纯色铺色</option>
+            </select>
+          </div>
+          <div v-if="props.options.surface.mapMode === 'color'" class="panel-item">
+            <span class="panel-label">纯色铺色:</span>
+            <div class="color-input-group">
+              <input type="color" v-model="surfaceMapColorHex" />
+            </div>
+          </div>
+          <div v-if="props.options.surface.mapMode === 'image'" class="panel-item">
+            <span class="panel-label">染色色相:</span>
+            <div class="color-input-group">
+              <input type="color" v-model="surfaceTintHex" />
+            </div>
+          </div>
+          <div v-if="props.options.surface.mapMode === 'image'" class="panel-item">
+            <span class="panel-label">染色强度:</span>
+            <input class="number-input" type="number" min="0" max="1" step="0.05" v-model.number="props.options.surface.tintStrength" @change="emitApply" />
+          </div>
+          <div class="panel-item toggle">
+            <span class="panel-label">法线浮雕:</span>
+            <input type="checkbox" v-model="props.options.surface.normalMap" @change="emitApply" />
+          </div>
+          <div class="panel-item">
+            <span class="panel-label">浮雕强度:</span>
+            <input class="number-input" type="number" min="0" max="2" step="0.05" v-model.number="props.options.surface.reliefStrength" @change="emitApply" />
+          </div>
+          <div class="panel-item toggle">
+            <span class="panel-label">轮廓光:</span>
+            <input type="checkbox" v-model="props.options.surface.edgeGlow" @change="emitApply" />
+          </div>
+          <div class="panel-item">
+            <span class="panel-label">光带强度:</span>
+            <input class="number-input" type="number" min="0" max="2" step="0.1" v-model.number="props.options.surface.glowLevel" @change="emitApply" />
+          </div>
+          <div class="panel-item">
+            <span class="panel-label">中心压暗:</span>
+            <input class="number-input" type="number" min="0" max="1" step="0.02" v-model.number="props.options.surface.centerDark" @change="emitApply" />
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-group">
+        <button class="panel-group-header" @click="sidePanelOpen = !sidePanelOpen">
+          <span>侧面水晶</span>
+          <span>{{ sidePanelOpen ? "-" : "+" }}</span>
+        </button>
+        <div v-if="sidePanelOpen" class="panel-group-body">
+          <div class="panel-item">
+            <span class="panel-label">底部颜色:</span>
+            <div class="color-input-group">
+              <input type="color" v-model="sideBottomHex" />
+            </div>
+          </div>
+          <div class="panel-item">
+            <span class="panel-label">顶部颜色:</span>
+            <div class="color-input-group">
+              <input type="color" v-model="sideTopHex" />
+            </div>
+          </div>
+          <div class="panel-item">
+            <span class="panel-label">条纹高光:</span>
+            <div class="color-input-group">
+              <input type="color" v-model="sideStripeHex" />
+            </div>
+          </div>
+          <div class="panel-item">
+            <span class="panel-label">条纹密度:</span>
+            <input class="number-input" type="number" min="0" max="20" step="0.2" v-model.number="props.options.side.stripeScale" @change="emitApply" />
+          </div>
+          <div class="panel-item">
+            <span class="panel-label">条纹强度:</span>
+            <input class="number-input" type="number" min="0" max="1" step="0.02" v-model.number="props.options.side.stripeStrength" @change="emitApply" />
+          </div>
+          <div class="panel-item">
+            <span class="panel-label">染色色相:</span>
+            <div class="color-input-group">
+              <input type="color" v-model="sideTintHex" />
+            </div>
+          </div>
+          <div class="panel-item">
+            <span class="panel-label">染色强度:</span>
+            <input class="number-input" type="number" min="0" max="1" step="0.05" v-model.number="props.options.side.tintStrength" @change="emitApply" />
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-group">
+        <button class="panel-group-header" @click="scenePanelOpen = !scenePanelOpen">
+          <span>场景特效</span>
+          <span>{{ scenePanelOpen ? "-" : "+" }}</span>
+        </button>
+        <div v-if="scenePanelOpen" class="panel-group-body">
+          <div class="panel-item toggle">
+            <span class="panel-label">地面光圈:</span>
+            <input type="checkbox" v-model="props.options.scene.groundRing" @change="emitApply" />
+          </div>
+          <div class="panel-item toggle">
+            <span class="panel-label">漂浮光柱:</span>
+            <input type="checkbox" v-model="props.options.scene.beams" @change="emitApply" />
+          </div>
+          <div class="panel-item toggle">
+            <span class="panel-label">区县标点:</span>
+            <input type="checkbox" v-model="props.options.scene.cones" @change="emitApply" />
+          </div>
+          <div class="panel-item toggle">
+            <span class="panel-label">轮廓跑光:</span>
+            <input type="checkbox" v-model="props.options.scene.trail" @change="emitApply" />
+          </div>
+          <div class="panel-item toggle">
+            <span class="panel-label">入场动画:</span>
+            <input type="checkbox" v-model="props.options.scene.intro" @change="emitApply" />
+          </div>
+          <div class="panel-item toggle">
+            <span class="panel-label">环境辉光:</span>
+            <input type="checkbox" v-model="props.options.glow.show" @change="emitApply" />
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-group">
         <button class="panel-group-header" @click="rangePanelOpen = !rangePanelOpen">
           <span>色阶图</span>
           <span>{{ rangePanelOpen ? "-" : "+" }}</span>
@@ -290,7 +454,7 @@ function updateColorByHex(target: "topColor" | "sideColor" | "uColor" | "outLine
         <div v-if="rangePanelOpen" class="panel-group-body">
           <div class="panel-item toggle">
             <span class="panel-label">显示色阶:</span>
-            <input type="checkbox" v-model="props.options.itemStyle.range.show" @change="emitApply" />
+            <input type="checkbox" v-model="props.options.itemStyle.range.show" @change="onRangeShowChange" />
           </div>
           <div class="panel-item">
             <span class="panel-label">映射模式:</span>
@@ -445,6 +609,12 @@ function updateColorByHex(target: "topColor" | "sideColor" | "uColor" | "outLine
   justify-content: space-between;
   font-size: 13px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.three-control-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .three-control-body {

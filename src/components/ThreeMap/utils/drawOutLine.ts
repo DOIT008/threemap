@@ -126,8 +126,11 @@ export const drawOutline = function (
 
   const wallOption = options.wall;
   const hasWall = wallOption && wallOption.show; // 是否启用墙体
-  const { depth, scale } = config;
-  const z = (depth + 1) / scale; // Z 轴基准高度（与 drawDistrict 保持一致）
+  // 贴图自带的边界发光已经画好了轮廓，再叠一条描线会在外沿夹出暗带，
+  // 所以描线和墙体各自独立开关（描线的显隐由 ThreeMap 切 outline.visible）
+  // 基准高度取地图顶面：厚度已由「宽度 × 厚度比」算好，不再依赖 config.scale
+  const mapWidth = this.mapWorldWidth || 10;
+  const z = (this.mapDepth || config.depth / config.scale) + mapWidth * 0.0007;
   const outline = new THREE.Object3D(); // 边界线容器
 
   // 解析边界线颜色
@@ -171,7 +174,7 @@ export const drawOutline = function (
               const height = wallOption.height;
               wp.push([
                 [x, -y, z], // 底部点
-                [x, -y, z + height / scale], // 顶部点（抬高 height）
+                [x, -y, z + (height / 100) * mapWidth], // 顶部点（height 按地图宽度的百分比抬升）
               ]);
             }
           }
@@ -183,6 +186,10 @@ export const drawOutline = function (
         line.rotation.x = -0.5 * Math.PI; // 旋转到 XZ 平面
         line._isGlow = true; // 标记为发光对象，应用 Bloom 效果
 
+        // 线始终建出来，显隐交给 outline.visible 控制。
+        // 早先这里是「关着就不建」，结果面板上把描线打开时组的 visible 变了、
+        // 里面却是空的 —— 开关点了没反应。建一条线的开销可以忽略，
+        // 换来的是开关能实时生效（改颜色也是走材质，不重建几何）。
         outline.add(line);
         wallPoints.push(wp); // 收集墙体路径
       });

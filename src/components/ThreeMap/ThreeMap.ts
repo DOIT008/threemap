@@ -5,19 +5,20 @@ import { CSS2DRenderer } from "three/examples/jsm/renderers/CSS2DRenderer.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 
-import { drawDistrict, districtRender, districtAnimate, updateDistrictMaterials } from "./utils/drawDistrict";
-import { drawOutline } from "./utils/drawOutLine";
-import { drawGlow } from "./utils/drawGlow";
-import { drawMirror, drawGradientPlane } from "./utils/drawPlane";
-import { drawMarker } from "./utils/drawMarker";
-import { drawPrism } from "./utils/drawPrism";
-import { drawFlight, updateMiniFly } from "./utils/drawFlight";
-import { drawScatter } from "./utils/drawScatter";
-import { drawCylinder } from "./utils/drawCylinder";
-import { addTooltip, tooltipRender } from "./utils/addTooltip";
-import { drawGrid } from "./utils/drawGrid";
-import { drawFoundation } from "./utils/drawFoundation";
-import { register } from "./utils/register";
+import { drawDistrict, districtRender, districtAnimate, updateDistrictMaterials } from './utils/drawDistrict';
+import { drawOutline } from './utils/drawOutLine';
+import { drawGlow } from './utils/drawGlow';
+import { drawMarker } from './utils/drawMarker';
+import { drawPrism } from './utils/drawPrism';
+import { drawFlight, updateMiniFly } from './utils/drawFlight';
+import { drawScatter } from './utils/drawScatter';
+import { drawCylinder } from './utils/drawCylinder';
+import { addTooltip, tooltipRender } from './utils/addTooltip';
+import { drawGrid } from './utils/drawGrid';
+import { drawFoundation } from './utils/drawFoundation';
+import { drawMirror } from './utils/drawMirror';
+import { drawBeams, drawCones, drawGroundRing, drawTrail, type SceneLayer } from './utils/drawScene';
+import { register } from './utils/register';
 
 import { uuid, centerOfMass, bbox, featureCollection } from "./utils/helpers";
 
@@ -34,6 +35,34 @@ import type {
   ScatterSeriesOptions,
   CylinderSeriesOptions,
 } from "./types";
+
+/**
+ * 相机距离 = 地图宽度 × 该比例。
+ * demo: |(-0.8, 10.2, 5.3)| = 11.52，地图世界宽 15.009 → 0.7675。
+ */
+const CAMERA_DISTANCE_RATIO = 0.7675;
+
+/**
+ * 入场起始机位相对最终机位的三轴倍率。
+ * demo: 从 (2, 15, 8) 推到 (-0.8, 10.2, 5.3)
+ *   距离 17.12 / 11.52 = 1.4861
+ *   方位角 atan2(2,8)=14.04° → atan2(-0.8,5.3)=-8.58°，差 22.6°
+ *   极角 acos(0.8761)=28.82° → acos(0.8854)=27.62°，比 1.0434
+ */
+const INTRO = {
+  distanceRatio: 1.4861,
+  azimuthDelta: (22.6 * Math.PI) / 180,
+  polarRatio: 1.0434,
+};
+
+/** 把向量按球坐标缩放：保持方向语义的「拉远 + 转一点 + 抬一点」 */
+function toSphericalFrom(from: THREE.Vector3, distanceRatio: number, azimuthDelta: number, polarRatio: number): THREE.Vector3 {
+  const radius = from.length() * distanceRatio;
+  const polar = Math.acos(THREE.MathUtils.clamp(from.y / (from.length() || 1), -1, 1)) * polarRatio;
+  const azimuth = Math.atan2(from.x, from.z) + azimuthDelta;
+  const sinPolar = Math.sin(polar);
+  return new THREE.Vector3(radius * sinPolar * Math.sin(azimuth), radius * Math.cos(polar), radius * sinPolar * Math.cos(azimuth));
+}
 
 export default class ThreeMap {
   el: HTMLElement;
@@ -75,7 +104,7 @@ export default class ThreeMap {
   raycaster: THREE.Raycaster | null;
   controls: OrbitControls | null;
   CSS2DRenderer: CSS2DRenderer | null;
-  lights: THREE.DirectionalLight[];
+  lights: THREE.Light[];
 
   bloomComposer: EffectComposer | null;
   finalComposer: EffectComposer | null;
@@ -92,6 +121,41 @@ export default class ThreeMap {
   uvScale?: THREE.Vector2;
   boundaryFeatures: GeoJsonFeatureCollection["features"] | null;
   lastWallKey: string | null;
+
+  /** 地图投影包围盒（世界单位），贴图/图元尺寸都按它换算 */
+  mapBox?: { minX: number; minY: number; width: number; height: number };
+  mapWorldWidth: number;
+  /** 地图世界厚度（挤出体高度），由地图宽度换算 */
+  mapDepth: number;
+  /** 飞线/跑光的距离补偿基准（跟随机位距离，保证线宽观感不变） */
+  refDistance: number;
+  /**
+   * 冻结动画（调试用）。
+   *
+   * 只有 URL 带 ?freeze=1 时由 index.vue 打开。冻结后所有 time 型动画
+   * （飞线流光、光柱漂移、光圈自转、顶点流光、侧面条纹）都停在原地，
+   * 画面完全静止 —— 逐项核对配置面板时才有稳定的基准可以做像素比对。
+   * 悬浮抬升不受影响，仍然照常插值。
+   */
+  frozen: boolean;
+  surfaceMaterials: THREE.ShaderMaterial[];
+  shiftMaterials: THREE.ShaderMaterial[];
+  /** 每个区县的载体节点：悬浮抬升逐帧 lerp scale.z */
+  districtCells: THREE.Group[];
+  /** 参与入场淡入的材质（所有带 uniforms.opacity 的材质） */
+  fadeMaterials: THREE.Material[];
+  /** 场景特效层（光圈/光柱/标点/描边跑光） */
+  sceneLayers: SceneLayer[];
+  mirrorHandle: ReturnType<typeof drawMirror> | null;
+  conesLayer: SceneLayer | null;
+  trailLayer: SceneLayer | null;
+  /** 场景图元（标点/跑光）的开关快照，变化时才重建 */
+  lastSceneToggleKey: string;
+  /** 入场动画开关快照 */
+  lastIntroKey: string;
+  lastSceneKey: string;
+  introFrame: number | null;
+  introDone: boolean;
 
   /**
    * ThreeMap 核心实例构造：初始化场景、渲染器、交互控制器和鼠标事件。
@@ -150,6 +214,24 @@ export default class ThreeMap {
     this.seriesKeyMap = new Map();
     this.boundaryFeatures = null;
     this.lastWallKey = null;
+
+    this.mapWorldWidth = 10;
+    this.surfaceMaterials = [];
+    this.districtCells = [];
+    this.shiftMaterials = [];
+    this.fadeMaterials = [];
+    this.sceneLayers = [];
+    this.mirrorHandle = null;
+    this.conesLayer = null;
+    this.trailLayer = null;
+    this.lastSceneToggleKey = "";
+    this.lastIntroKey = "";
+    this.lastSceneKey = "";
+    this.mapDepth = 0;
+    this.refDistance = 10;
+    this.frozen = false;
+    this.introFrame = null;
+    this.introDone = false;
 
     const onPointerMove = (mouseEvent: MouseEvent): void => {
       this.pointer!.x = (mouseEvent.offsetX / this.innerWidth) * 2 - 1;
@@ -227,9 +309,17 @@ export default class ThreeMap {
       updateDistrictMaterials.call(this as any, options.data, options);
       this.updateOutlineLayers(options);
       this.updateEnvironment(options);
+      this.updateSceneLayers(options);
       this.updateControls(options);
       this.addTooltipLayer();
       this.updateSeriesLayers(options);
+      // 入场动画开关被打开时补播一次
+      const introKey = `${options.scene.intro}`;
+      if (introKey !== this.lastIntroKey) {
+        this.lastIntroKey = introKey;
+        this.collectFadeMaterials();
+        this.playIntro(options);
+      }
       return;
     }
 
@@ -245,15 +335,6 @@ export default class ThreeMap {
     this.seriesKeyMap = new Map();
 
     const code = options.map + "";
-    const camera = options.camera;
-    const { x, y, z } = camera;
-    this.setEnvironment(options);
-    this.setFoundation(options);
-
-    if (!this.isInitCamera) {
-      this.setCamera(x, y, z);
-    }
-    this.isInitCamera = true;
 
     const { autoRotate, config } = options;
     const { disableRotate = false, disableZoom = false } = config;
@@ -298,9 +379,42 @@ export default class ThreeMap {
         }
       }
 
+      // ---- 尺寸基准：所有图元（光圈/光柱/飞线/描线）都按「地图宽度」换算，
+      //      这样换地图、换容器大小，观感比例都不会跑
+      this.updateMapSize(full, projection, config.depth);
+
+      // ---- 居中 + 悬浮 ----
+      // demo 的 Center 组件把地图按「包围盒中心」对齐到 x/z 原点（投影中心来自形心，
+      // 两者并不重合，不补这个偏移地图会整体偏一边）；
+      // y 方向抬离地面 0.19（地图宽 15.009），镜面/光圈留在 y≈0 撑出倒影的间隙。
+      const box = this.mapBox;
+      const offsetX = box ? -(box.minX * 2 + box.width) / 2 : 0;
+      // 形状坐标 y 与世界 z 差一个负号（rotation.x = -90°），所以 z 的偏移是正的包围盒中心
+      const offsetZ = box ? (box.minY * 2 + box.height) / 2 : 0;
+      this.seriesGroup.position.set(offsetX, this.mapWorldWidth * 0.01266, offsetZ);
+
+      // ---- 相机：与 demo 同构图（距离 = 0.7675 × 地图宽，方向取 options.camera）----
+      this.setCamera(options.camera.x, options.camera.y, options.camera.z);
+      // 线宽补偿基准：demo 里机位距离 11.52 配 refDistance 14，
+      // 这里跟着实际机位走，换机位线宽观感才不会突然变粗变细
+      this.refDistance = this.camera!.position.length() * 1.2153;
+      this.isInitCamera = true;
+
+      // ---- 背景与雾：深海军蓝 + 远处渐隐，让地图像悬在空间里 ----
+      this.setBackground();
+
+      // ---- 环境层（镜面 / 地面光圈 / 光柱）----
+      this.setEnvironment(options);
+      this.setFoundation(options);
+      this.lastSceneKey = `${options.mirror.show}|${options.scene.groundRing}|${options.scene.beams}|${options.glow.show}|${options.grid.show}|${options.foundation.show}`;
+      this.lastSceneKey = `${options.mirror.show}|${options.scene.groundRing}|${options.scene.beams}|${options.glow.show}|${options.grid.show}|${options.foundation.show}`;
+
       this.drawDistrictArea(options.data, full.features, options);
       this.drawDistrictOutline(boundary.features, options);
       this.lastWallKey = `${options.wall.show}|${options.wall.height}|${options.wall.color}`;
+
+      // ---- 场景特效（标点 / 描边跑光）----
+      this.buildSceneLayers(options);
 
       const series = options.series;
       series.forEach((item) => {
@@ -324,6 +438,11 @@ export default class ThreeMap {
         const seriesId = this.getSeriesId(item);
         this.seriesKeyMap.set(seriesId, this.getSeriesKey(item));
       });
+
+      // ---- 入场动画：收集淡入材质，跑相机推进 + 厚度生长 ----
+      this.collectFadeMaterials();
+      this.lastIntroKey = `${options.scene.intro}`;
+      this.playIntro(options);
     } else {
       throw Error("请先注册地图: " + code);
     }
@@ -334,6 +453,13 @@ export default class ThreeMap {
    */
   updateOutlineLayers(options: ThreeMapOptions): void {
     if (!this.seriesGroup || !this.boundaryFeatures) return;
+
+    // 外轮廓描线显隐（贴图自带边界光时关掉，避免外沿夹出一条暗带）
+    this.seriesGroup.children.forEach((child: any) => {
+      if (child?._category === 'outline') {
+        child.visible = options.outLineStyle.show !== false;
+      }
+    });
 
     const wallKey = `${options.wall.show}|${options.wall.height}|${options.wall.color}`;
     if (this.lastWallKey === wallKey) return;
@@ -386,47 +512,39 @@ export default class ThreeMap {
   }
 
   /**
-   * 更新环境层（网格/底座/镜面/辉光），不影响地图块与 series。
+   * 更新环境层（镜面 / 地面光圈 / 光柱），只在开关变化时重建。
    */
   updateEnvironment(options: ThreeMapOptions): void {
     if (!this.environmentGroup) return;
 
-    const disposeObject = (obj: any): void => {
-      if (!obj) return;
-      if (obj.geometry) {
-        obj.geometry.dispose();
-      }
-      if (obj.material) {
-        if (Array.isArray(obj.material)) {
-          obj.material.forEach((m: any) => {
-            m.map?.dispose();
-            m.dispose?.();
-          });
-        } else {
-          obj.material.map?.dispose();
-          obj.material.dispose?.();
-        }
-      }
-    };
+    const key = `${options.mirror.show}|${options.scene.groundRing}|${options.scene.beams}|${options.glow.show}|${options.grid.show}|${options.foundation.show}`;
+    if (this.lastSceneKey === key) return;
+    this.lastSceneKey = key;
 
-    this.environmentGroup.traverse(disposeObject);
-    if (this.environmentGroup.children.length) {
-      this.environmentGroup.children = [];
+    // 先按专用句柄回收（光柱/跑光有额外资源，镜面有离屏 fbo）
+    this.sceneLayers.forEach((layer) => layer.dispose());
+    this.sceneLayers = [];
+    if (this.mirrorHandle) {
+      this.mirrorHandle.dispose();
+      this.mirrorHandle = null;
     }
+    this.foundationIns = [];
 
-    const bloomComposer = this.bloomComposer as any;
-    if (bloomComposer && typeof bloomComposer.dispose === "function") {
-      bloomComposer.dispose();
-    }
-    const finalComposer = this.finalComposer as any;
-    if (finalComposer && typeof finalComposer.dispose === "function") {
-      finalComposer.dispose();
-    }
-    this.bloomComposer = null;
-    this.finalComposer = null;
+    // 再兜底清空环境组剩余对象（网格 / 底座）
+    this.environmentGroup.children.slice().forEach((child: any) => {
+      this.environmentGroup!.remove(child);
+      child.traverse((obj: any) => {
+        obj.geometry?.dispose?.();
+        const materials = Array.isArray(obj.material) ? obj.material : obj.material ? [obj.material] : [];
+        materials.forEach((m: any) => {
+          m.map?.dispose?.();
+          m.dispose?.();
+        });
+      });
+    });
 
-    this.setEnvironment(options);
     this.setFoundation(options);
+    this.setEnvironment(options);
   }
 
   /**
@@ -564,18 +682,303 @@ export default class ThreeMap {
   }
 
   /**
-   * 配置场景环境特效（辉光、镜面、渐变底板）。
+   * 配置场景环境特效（镜面反射 + 地面光圈 + 漂浮光柱）
    */
   setEnvironment(options: ThreeMapOptions): void {
-    const { bloomComposer, finalComposer } = drawGlow.call(this as any, options);
-    this.bloomComposer = bloomComposer;
-    this.finalComposer = finalComposer;
-    if (options.mirror.show) {
-      const mirror = drawMirror.call(this, this.innerWidth, this.innerHeight, options.config);
-      const gradientPlane = drawGradientPlane.call(this, options.mirror.color);
-      this.environmentGroup.add(mirror);
-      this.environmentGroup.add(gradientPlane);
+    // bloom 只在需要时创建：demo 本体没有辉光，默认走直接渲染，颜色才不会被推白
+    if (options.glow.show) {
+      const { bloomComposer, finalComposer } = drawGlow.call(this as any, options);
+      this.bloomComposer = bloomComposer;
+      this.finalComposer = finalComposer;
+    } else {
+      this.bloomComposer = null;
+      this.finalComposer = null;
     }
+
+    const width = this.mapWorldWidth;
+
+    if (options.scene.groundRing) {
+      const ring = drawGroundRing(width);
+      this.environmentGroup.add(ring.object);
+      this.sceneLayers.push(ring);
+    }
+
+    if (options.scene.beams) {
+      const beams = drawBeams(width);
+      this.environmentGroup.add(beams.object);
+      this.sceneLayers.push(beams);
+    }
+
+    if (options.mirror.show) {
+      this.mirrorHandle = drawMirror(width, this.scene!, this.camera!);
+      this.environmentGroup.add(this.mirrorHandle.mesh);
+    }
+  }
+
+  /**
+   * 计算地图的投影包围盒与世界宽度。
+   *
+   * 所有图元尺寸（光圈、光柱、飞线宽度、描线宽度）都以它为基准换算成「占宽比」，
+   * 这样换地图、换容器尺寸，观感比例都不会跑偏。
+   */
+  updateMapSize(boundary: GeoJsonFeatureCollection, projection: (coords: [number, number]) => [number, number] | null, depthValue = 0): void {
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+
+    const walk = (obj: any): void => {
+      if (!obj) return;
+      if (obj.type === 'FeatureCollection') obj.features.forEach(walk);
+      else if (obj.type === 'Feature') walk(obj.geometry);
+      else if (obj.type === 'Polygon') obj.coordinates.forEach((ring: any) => ring.forEach((p: number[]) => push(p)));
+      else if (obj.type === 'MultiPolygon') obj.coordinates.forEach((poly: any) => poly.forEach((ring: any) => ring.forEach((p: number[]) => push(p))));
+    };
+    const push = (p: number[]): void => {
+      const point = projection(p as [number, number]);
+      if (!point) return;
+      const [x, y] = point;
+      if (!x || !y) return;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (-y < minY) minY = -y;
+      if (-y > maxY) maxY = -y;
+    };
+    walk(boundary);
+
+    if (Number.isFinite(minX) && maxX > minX) {
+      this.mapBox = { minX, minY, width: maxX - minX, height: maxY - minY };
+      this.mapWorldWidth = maxX - minX;
+    } else {
+      this.mapWorldWidth = 10;
+    }
+
+    // 厚度 = 宽度 × 厚度比。demo 是 1.6 / 30.018 ≈ 5.33%，
+    // config.depth 在这里当成「千分比」，默认 53 就是 5.3%。
+    this.mapDepth = this.mapWorldWidth * (depthValue / 1000);
+  }
+
+  /**
+   * 背景与雾：深海军蓝底 + 远处渐隐，地图像悬在空间里而不是贴在墙上。
+   * 参数按地图宽度换算（demo: 底色 #041533，雾 20~60，地图宽 15）。
+   */
+  setBackground(): void {
+    if (!this.scene) return;
+    const color = new THREE.Color('#041533');
+    this.scene.background = color;
+    const w = this.mapWorldWidth;
+    this.scene.fog = new THREE.Fog(color, w * 1.33, w * 4);
+    this.renderer?.setClearColor(color, 1);
+  }
+
+  /**
+   * 场景特效层：区县标点 + 沿轮廓的描边跑光
+   */
+  buildSceneLayers(options: ThreeMapOptions): void {
+    // 可重复调用：先把上一次的标点/跑光摘掉（面板切开关时会走这里）
+    const dropLayer = (layer: SceneLayer | null): null => {
+      if (!layer) return null;
+      this.seriesGroup?.remove(layer.object);
+      layer.dispose();
+      return null;
+    };
+    this.conesLayer = dropLayer(this.conesLayer);
+    this.trailLayer = dropLayer(this.trailLayer);
+
+    // 顶面高度：光柱/光圈/飞线都要站在顶面上，否则会沉进挤出体里
+    const topY = this.mapDepth;
+
+    if (options.scene.cones && this.districtData.length) {
+      const centers = this.districtData.map((d) => {
+        const center = (d.centroid || d.center) as [number, number];
+        const [x, y] = this.projection(center);
+        return new THREE.Vector3(x, 0, y);
+      });
+      const cones = drawCones(centers, topY, this.mapWorldWidth);
+      // 入场没结束时先藏着，等厚度长完再显形
+      cones.object.visible = this.introDone;
+      this.conesLayer = cones;
+      this.seriesGroup.add(cones.object);
+    }
+
+    if (options.scene.trail && this.boundaryFeatures) {
+      const trail = drawTrail(this as any, { type: 'FeatureCollection', features: this.boundaryFeatures }, topY, this.mapWorldWidth);
+      if (trail) {
+        this.trailLayer = trail;
+        this.seriesGroup.add(trail.object);
+      }
+    }
+
+    this.lastSceneToggleKey = `${options.scene.cones}|${options.scene.trail}`;
+  }
+
+  /**
+   * 增量更新场景图元开关（标点 / 跑光）。
+   */
+  updateSceneLayers(options: ThreeMapOptions): void {
+    const key = `${options.scene.cones}|${options.scene.trail}`;
+    if (key === this.lastSceneToggleKey) return;
+    if (!this.districtData.length) return;
+    this.buildSceneLayers(options);
+  }
+
+  /**
+   * 收集所有带 uniforms.opacity 的材质，入场时统一淡入。
+   *
+   * 同时负责它们的 depthWrite：opacity 还是 0 的时候地图看不见，但它照样写深度，
+   * 会把自己轮廓范围内的地面光圈、星点整片挡在身后 —— 画面上就是一块和地图形状
+   * 一模一样的深色剪影。所以淡入期间关掉深度写入，真的看得见了再打开。
+   */
+  collectFadeMaterials(): void {
+    this.fadeMaterials = [];
+    if (!this.seriesGroup) return;
+
+    const seen = new Set<THREE.Material>();
+    const add = (material: any): void => {
+      if (material?.uniforms?.opacity && !seen.has(material)) {
+        seen.add(material);
+        this.fadeMaterials.push(material);
+      }
+    };
+
+    // 顶面/侧面材质此刻可能还没挂到场景里（ExtrudeGeometry 是延迟一帧建的），
+    // 直接按材质数组收，避免侧面材质漏掉后一直是透明的
+    this.surfaceMaterials.forEach(add);
+    this.shiftMaterials.forEach(add);
+
+    this.seriesGroup.traverse((obj: any) => {
+      const materials = Array.isArray(obj.material) ? obj.material : obj.material ? [obj.material] : [];
+      materials.forEach(add);
+    });
+
+    this.applyDepthWrite(false);
+  }
+
+  /**
+   * 区县标签显隐。
+   *
+   * demo 是等入场动画跑完才把标签挂上去的：地图还在长厚度的 3.5 秒里，
+   * 标签已经漂在地图上方，看着很奇怪。这里用同样的时机控制。
+   */
+  setDistrictLabelVisible(visible: boolean): void {
+    if (!this.seriesGroup) return;
+    const show = visible && (this.options?.label.show ?? true);
+    this.seriesGroup.traverse((obj: any) => {
+      if (obj._isDistrict && obj._type === 'label') {
+        obj.visible = show;
+        if (obj.element) obj.element.style.display = show ? '' : 'none';
+      }
+    });
+  }
+
+  /**
+   * 区县边界线透明度（0~1 倍率）。
+   *
+   * 入场时地表还是全透明的，边界线却已经画在画面上了 —— 会在蓝色光晕上
+   * 浮出一堆细线。所以它跟着厚度生长的进度一起淡入，时机和地表完全同步。
+   */
+  setDistrictLineOpacity(scale: number): void {
+    const cells = this.districtCells;
+    if (!cells) return;
+    for (let i = 0; i < cells.length; i++) {
+      const line: any = (cells[i] as any)?._line;
+      const material: any = line?.material;
+      if (!material) continue;
+      const base = material.userData.baseOpacity ?? 0;
+      material.opacity = base * scale;
+      line.visible = scale > 0.001;
+    }
+  }
+
+  applyDepthWrite(enabled: boolean): void {
+    this.fadeMaterials.forEach((material: any) => {
+      material.depthWrite = enabled;
+    });
+  }
+
+  /**
+   * 入场动画（与 demo 的 timeline 同节奏）：
+   *   0 ~ 2.5s   相机从远处斜右方推进到最终机位（circ.out）
+   *   2.5 ~ 3.5s 地图从「零厚度」长起来，同时整体淡入
+   * 相机位移用球坐标表达（距离 / 方位角 / 极角三个倍率），
+   * 这样换机位、换地图都还是同一个观感，不用硬编码坐标。
+   */
+  playIntro(options: ThreeMapOptions): void {
+    if (this.introFrame) cancelAnimationFrame(this.introFrame);
+    this.introFrame = null;
+
+    // setCamera 已经把方向换算成「宽度 × 距离比」的最终机位，这里直接取用
+    const end = this.camera ? this.camera.position.clone() : new THREE.Vector3();
+
+    if (!options.scene.intro) {
+      this.camera?.position.copy(end);
+      this.seriesGroup?.scale.set(1, 1, 1);
+      this.fadeMaterials.forEach((material: any) => {
+        material.uniforms.opacity.value = 1;
+      });
+      this.applyDepthWrite(true);
+      if (this.conesLayer) this.conesLayer.object.visible = true;
+      this.setDistrictLabelVisible(true);
+      this.setDistrictLineOpacity(1);
+      this.introDone = true;
+      return;
+    }
+
+    const start = toSphericalFrom(end, INTRO.distanceRatio, INTRO.azimuthDelta, INTRO.polarRatio);
+    this.introDone = false;
+    this.setDistrictLabelVisible(false);
+    this.setDistrictLineOpacity(0);
+    this.camera?.position.copy(start);
+    // 只压扁 Y（地图厚度方向），XZ 不动，避免入场时贴图被拉伸
+    this.seriesGroup?.scale.set(1, 0.0001, 1);
+    if (this.conesLayer) this.conesLayer.object.visible = false;
+
+    const cameraTween = { duration: 2500 };
+    const growTween = { delay: 2500, duration: 1000 };
+    const t0 = performance.now();
+
+    const easeOutCirc = (x: number): number => Math.sqrt(1 - Math.pow(x - 1, 2));
+    const easeOutQuad = (x: number): number => 1 - (1 - x) * (1 - x);
+
+    const step = (): void => {
+      const elapsed = performance.now() - t0;
+
+      // 相机推进
+      const ct = Math.min(1, elapsed / cameraTween.duration);
+      const ce = easeOutCirc(ct);
+      if (this.camera) {
+        this.camera.position.lerpVectors(start, end, ce);
+      }
+
+      // 厚度生长 + 淡入
+      const gt = Math.min(1, Math.max(0, (elapsed - growTween.delay) / growTween.duration));
+      const ge = easeOutQuad(gt);
+      if (this.seriesGroup) {
+        this.seriesGroup.scale.y = Math.max(0.0001, ge);
+      }
+      this.fadeMaterials.forEach((material: any) => {
+        material.uniforms.opacity.value = ge;
+      });
+      this.setDistrictLineOpacity(ge);
+      // 淡入过半才恢复写深度，避免切太早闪一下暗块
+      this.applyDepthWrite(ge > 0.06);
+
+      if (elapsed < growTween.delay + growTween.duration) {
+        this.introFrame = requestAnimationFrame(step);
+      } else {
+        if (this.seriesGroup) this.seriesGroup.scale.set(1, 1, 1);
+        this.fadeMaterials.forEach((material: any) => {
+          material.uniforms.opacity.value = 1;
+        });
+        this.applyDepthWrite(true);
+        if (this.conesLayer) this.conesLayer.object.visible = true;
+        this.setDistrictLabelVisible(true);
+        this.setDistrictLineOpacity(1);
+        this.introDone = true;
+        this.introFrame = null;
+      }
+    };
+    this.introFrame = requestAnimationFrame(step);
   }
 
   /**
@@ -632,40 +1035,43 @@ export default class ThreeMap {
   }
 
   /**
-   * 创建四向平行光，增强地图立体层次。
+   * 灯光对齐 demo：环境光提亮整体 + 一盏斜上方平行光塑造顶面/侧面的明暗层次。
+   * 顶面是贴图材质（MeshStandardMaterial 风格着色），光一多就会把浮雕和轮廓光冲淡，
+   * 所以故意只留两盏。
    */
-  setLight(): THREE.DirectionalLight[] {
-    const front = new THREE.DirectionalLight(0xe8eaeb, 0.8);
-    front.position.set(0, 15, 25);
-    const back = front.clone();
-    back.position.set(0, 15, -25);
-    const left = front.clone();
-    left.position.set(-25, 15, 0);
-    const right = front.clone();
-    right.position.set(25, 15, 0);
+  setLight(): THREE.Light[] {
+    const ambient = new THREE.AmbientLight(0xffffff, 2);
+    const dir = new THREE.DirectionalLight(0xffffff, 10);
+    dir.position.set(0, 50, -50);
 
-    this.scene!.add(front);
-    this.scene!.add(back);
-    this.scene!.add(left);
-    this.scene!.add(right);
+    this.scene!.add(ambient);
+    this.scene!.add(dir);
 
-    return [front, back, left, right];
+    return [ambient, dir];
   }
 
   /**
    * 初始化透视相机默认位置。
    */
   initCamera(): void {
-    this.camera = new THREE.PerspectiveCamera(75, this.innerWidth / this.innerHeight, 0.1, 1000);
+    this.camera = new THREE.PerspectiveCamera(70, this.innerWidth / this.innerHeight, 0.1, 1000);
     this.camera.position.set(1, 5, 5);
     this.camera.lookAt(0, 0, 0);
   }
 
   /**
    * 设置相机位置。
+   *
+   * options.camera 只当方向用：真正的距离由地图宽度决定（demo: 11.52 / 15.009 = 0.7675）。
+   * 这样换地图、换容器，构图永远是「地图占满画面中心」的同一个视角。
    */
   setCamera(x: number, y: number, z: number): void {
-    this.camera && this.camera.position.set(x, y, z);
+    if (!this.camera) return;
+    const dir = new THREE.Vector3(x, y, z);
+    if (dir.lengthSq() < 1e-6) dir.set(0.1, 0.9, 0.45);
+    dir.normalize().multiplyScalar(this.mapWorldWidth * CAMERA_DISTANCE_RATIO);
+    this.camera.position.copy(dir);
+    this.camera.lookAt(0, 0, 0);
   }
 
   /**
@@ -716,57 +1122,40 @@ export default class ThreeMap {
   }
 
   /**
+   * 冻结/解冻 time 型动画（调试用，见 frozen 字段）。
+   */
+  setFrozen(value: boolean): void {
+    this.frozen = value;
+  }
+
+  /**
    * 每帧渲染：更新控制器、飞线/散点动画、辉光后处理与交互状态。
    */
   render(): void {
-    const { cacheDarkMaterials, cacheMaterials, controls, pointer, camera, raycaster, scene, bloomComposer, finalComposer } = this;
+    const { controls, pointer, camera, raycaster, scene, bloomComposer, finalComposer } = this;
     if (!controls || !pointer || !camera || !raycaster || !scene) return;
+
+    const delta = this.clock ? Math.min(this.clock.getDelta(), 0.1) : 0.016;
 
     controls.update();
     raycaster.setFromCamera(pointer, camera);
 
-    const flightGroup = this.seriesGroup.children.filter((it: any) => it._category === "flight");
-    flightGroup.forEach((group) => {
-      updateMiniFly(group.children as any);
-    });
+    if (!this.frozen) {
+      // 飞线流光
+      const flightGroup = this.seriesGroup.children.filter((it: any) => it._category === "flight");
+      updateMiniFly(flightGroup as any, delta);
 
-    this.CSS2DRenderer!.render(scene, camera);
+      // 场景层（地面光圈自转 / 光柱漂移 / 轮廓跑光）
+      this.sceneLayers.forEach((layer) => layer.update(delta));
 
-    scene.traverse((mesh: any) => {
-      if (mesh instanceof THREE.Scene) {
-        cacheDarkMaterials.scene = mesh.background;
-        mesh.background = null;
-      }
+      // 散点涟漪
+      this.foundationIns.forEach((mesh: any) => {
+        mesh && (mesh.rotation.z -= mesh._speed || 0.003);
+      });
+    }
 
-      const material = mesh.material;
-      if (material && !mesh._isGlow && material.type != "ShaderMaterial") {
-        cacheMaterials[mesh.uuid] = material;
-
-        if (!cacheDarkMaterials[material.type]) {
-          const Proto = Object.getPrototypeOf(material).constructor;
-          cacheDarkMaterials[material.type] = new Proto({ color: 0x000000 });
-        }
-        mesh.material = cacheDarkMaterials[material.type];
-      }
-    });
-
-    bloomComposer && bloomComposer.render();
-
-    scene.traverse((mesh: any) => {
-      if (cacheMaterials[mesh.uuid]) {
-        mesh.material = cacheMaterials[mesh.uuid];
-        delete cacheMaterials[mesh.uuid];
-      }
-      if (mesh instanceof THREE.Scene) {
-        mesh.background = cacheMaterials.scene;
-        delete cacheMaterials.scene;
-      }
-    });
-
-    finalComposer && finalComposer.render();
-
-    districtRender.call(this as any);
-    tooltipRender.call(this as any);
+    // 区县顶面/侧面时间推进 + 悬浮抬升插值（冻结时只停时间，抬升照常）
+    districtAnimate.call(this as any, this.frozen ? 0 : delta);
 
     const scatterGroup = this.seriesGroup.children.filter((it: any) => it._category === "scatter");
     scatterGroup.forEach((group) => {
@@ -784,12 +1173,51 @@ export default class ThreeMap {
       });
     });
 
-    this.foundationIns.forEach((mesh: any) => {
-      mesh && (mesh.rotation.z -= mesh._speed || 0.003);
-    });
+    // 镜面反射必须在主渲染之前把场景渲到离屏纹理
+    if (this.mirrorHandle && this.renderer) {
+      this.mirrorHandle.render(this.renderer, scene, camera);
+    }
 
-    const mapUf = this.mapUf;
-    districtAnimate.call(this as any, mapUf);
+    if (bloomComposer) {
+      // 保留旧辉光路径：先只画自发光体求 bloom，再整场渲染 + 叠加
+      const { cacheDarkMaterials, cacheMaterials } = this;
+      scene.traverse((mesh: any) => {
+        if (mesh instanceof THREE.Scene) {
+          cacheDarkMaterials.scene = mesh.background;
+          mesh.background = null;
+        }
+        const material = mesh.material;
+        // _skipBloomDarken：带自定义 uniform / onBeforeCompile 注入的材质不能这样替换，
+        // 换出来的实例缺 uniform，渲染时直接抛错（见 drawMirror 的说明）
+        if (material && !mesh._isGlow && material.type != "ShaderMaterial" && mesh._skipBloomDarken !== true) {
+          cacheMaterials[mesh.uuid] = material;
+          if (!cacheDarkMaterials[material.type]) {
+            const Proto = Object.getPrototypeOf(material).constructor;
+            cacheDarkMaterials[material.type] = new Proto({ color: 0x000000 });
+          }
+          mesh.material = cacheDarkMaterials[material.type];
+        }
+      });
+      bloomComposer.render();
+      scene.traverse((mesh: any) => {
+        if (cacheMaterials[mesh.uuid]) {
+          mesh.material = cacheMaterials[mesh.uuid];
+          delete cacheMaterials[mesh.uuid];
+        }
+        if (mesh instanceof THREE.Scene) {
+          mesh.background = cacheMaterials.scene;
+          delete cacheMaterials.scene;
+        }
+      });
+      finalComposer && finalComposer.render();
+    } else if (this.renderer) {
+      this.renderer.render(scene, camera);
+    }
+
+    this.CSS2DRenderer && this.CSS2DRenderer.render(scene, camera);
+
+    districtRender.call(this as any);
+    tooltipRender.call(this as any);
   }
 
   /**
@@ -797,6 +1225,8 @@ export default class ThreeMap {
    */
   drawDistrictOutline(features: GeoJsonFeatureCollection["features"], options: ThreeMapOptions): void {
     const { outline, drawWall, wallTexture } = drawOutline.call(this as any, features, options, options.config);
+    (outline as any)._category = 'outline';
+    outline.visible = options.outLineStyle.show !== false;
     this.seriesGroup.add(outline);
     this.mapTextures.push(wallTexture);
     drawWall().then((group) => {
@@ -808,11 +1238,11 @@ export default class ThreeMap {
    * 绘制行政区主体（顶面/侧面/标签）并维护缩放缓存模型。
    */
   drawDistrictArea(data: ThreeMapOptions["data"], features: GeoJsonFeatureCollection["features"], options: ThreeMapOptions): void {
-    const { meshGroup, advanceMeshGroup, mapUf, districtData, _realShape, _cancelRealShape, mapTexture } = drawDistrict.call(this as any, data, options, features, options.config);
+    const { meshGroup, advanceMeshGroup, districtData, surfaceMaterials, shiftMaterials, _realShape, _cancelRealShape } = drawDistrict.call(this as any, data, options, features, options.config);
     this._cancelRealShape = _cancelRealShape;
-    this.mapTextures.push(mapTexture);
-    this.mapUf = mapUf;
     this.districtData = districtData;
+    this.surfaceMaterials = surfaceMaterials;
+    this.shiftMaterials = shiftMaterials;
 
     if (!this.refresh) {
       advanceMeshGroup.scale.set(this.scale, 1, this.scale);
@@ -849,9 +1279,12 @@ export default class ThreeMap {
       }
       const modelBox = this.cacheModel!.modelBox!;
       const modelScale: { code: string | number; scale: number }[] = [];
-      res.forEach((mesh: any) => {
-        const code = mesh._privateData.adcode;
-        const model = mesh.clone();
+      res.forEach((item: any) => {
+        // group 的子节点现在是「区县载体 cell」，真正的 mesh 在 cell 里面
+        const district = item._type === 'district' ? item : item.children?.find((c: any) => c?._type === 'district');
+        if (!district) return;
+        const code = district._privateData?.adcode;
+        const model = item.clone();
         model.scale.set(1, 1, 1);
         const currentModel = new THREE.Box3().setFromObject(model);
         const widthA = modelBox.max.x - modelBox.min.x;
@@ -949,6 +1382,26 @@ export default class ThreeMap {
       this.scene!.remove(light);
     });
     this.lights = [];
+
+    // 入场动画帧
+    if (this.introFrame) {
+      cancelAnimationFrame(this.introFrame);
+      this.introFrame = null;
+    }
+
+    // 场景层（光圈/光柱/跑光）与镜面离屏资源
+    this.sceneLayers.forEach((layer) => layer.dispose());
+    this.sceneLayers = [];
+    if (this.mirrorHandle) {
+      this.mirrorHandle.dispose();
+      this.mirrorHandle = null;
+    }
+    this.conesLayer = null;
+    this.fadeMaterials = [];
+    this.surfaceMaterials = [];
+    this.shiftMaterials = [];
+    this.districtCells = [];
+
     this.clearMap();
     this.cacheModel = null;
 

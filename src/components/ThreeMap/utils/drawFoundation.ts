@@ -34,7 +34,7 @@ export const drawFoundation = function (options: FoundationOptions | undefined, 
       depthWrite: false,
     });
 
-    foundation = new THREE.Mesh(planeGeometry, material) as FoundationMesh;
+    foundation = new THREE.Mesh(planeGeometry, material) as unknown as FoundationMesh;
     foundation.rotation.x = -0.5 * Math.PI;
     foundation._speed = speed / scale;
     foundation._type = "foundation";

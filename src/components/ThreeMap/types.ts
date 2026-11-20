@@ -1,4 +1,9 @@
-import type * as THREE from "three";
+import type * as THREE from 'three';
+
+import type { SideOptions } from './materials/shift';
+import type { SurfaceOptions } from './materials/surface';
+
+export type { SideOptions, SurfaceOptions };
 
 // ==================== GeoJSON ====================
 
@@ -249,6 +254,23 @@ export interface ThreeMapOptions {
     offset: { x: number; y: number };
     image: string;
   };
+  /** 顶面材质：纹理来源（图片/纯色）× 法线 自由组合，外加轮廓光与中心压暗 */
+  surface: SurfaceOptions;
+  /** 侧面（挤出体立面）配色，与顶面完全独立 */
+  side: SideOptions;
+  /** 场景特效开关 */
+  scene: {
+    /** 地面光圈 */
+    groundRing: boolean;
+    /** 漂浮光柱 */
+    beams: boolean;
+    /** 区县标点（光锥 + 光环） */
+    cones: boolean;
+    /** 沿轮廓的描边跑光 */
+    trail: boolean;
+    /** 入场动画（相机推进 + 厚度生长 + 淡入） */
+    intro: boolean;
+  };
   map: string;
   mapName: string;
   glow: {
@@ -273,6 +295,8 @@ export interface ThreeMapOptions {
     color: string;
   };
   outLineStyle: {
+    /** 是否显示外轮廓线（贴图自带边界光时建议关掉，避免和光带夹出一条暗边） */
+    show: boolean;
     color: string;
   };
   label: LabelOptions;
@@ -354,5 +378,19 @@ export interface ThreeMapContext {
   uvScale?: THREE.Vector2;
   isClear: boolean;
   mapUf?: MapUniform;
+  /** 地图在投影平面上的包围盒（世界单位） */
+  mapBox?: { minX: number; minY: number; width: number; height: number };
+  /** 地图世界宽度，用来把贴图/图元尺寸换算成「占宽比」 */
+  mapWorldWidth?: number;
+  /** 地图世界厚度（挤出体高度），同样由地图宽度换算，保证换容器不变形 */
+  mapDepth?: number;
+  /** 飞线/跑光的距离补偿基准（通常等于机位距离 × 1.215） */
+  refDistance?: number;
+  /** 顶面材质列表（每帧推进 time） */
+  surfaceMaterials?: THREE.ShaderMaterial[];
+  /** 侧面材质列表 */
+  shiftMaterials?: THREE.ShaderMaterial[];
+  /** 每个区县的载体节点（悬浮抬升用，逐帧 lerp scale.z） */
+  districtCells?: THREE.Group[];
   [key: string]: any;
 }

@@ -1,240 +1,229 @@
-import * as THREE from "three";
-import { CSS2DObject } from "three/examples/jsm/renderers/CSS2DRenderer.js";
-import tinycolor from "tinycolor2";
-import { drawLabel } from "./drawLabel";
-import { isNumber, rangeColor, separateColor, centerOfMass, deepMerge } from "./helpers";
-import chinaTexture from "@/assets/images/china_tintable_hc.png";
-import type { ThreeMapContext, ThreeMapOptions, GeoJsonFeature, GeoJsonProperties, MapConfig, DataItem, LabelOptions, MapUniform } from "../types";
+import * as THREE from 'three';
+import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
+import tinycolor from 'tinycolor2';
 
-// 预加载中性灰度纹理，避免颜色混合污染
-const staticTexture = new THREE.TextureLoader().load(chinaTexture);
-
-/**
- * 生成 Fragment Shader 代码片段 - 实现侧面扫光动画效果
- *
- * 核心逻辑：
- * 1. 垂直渐变：底部黑色 -> 顶部浅蓝色，模拟环境光照
- * 2. 扫光动画：y 坐标随时间移动，在 [y, y+h] 区间内与 uColor 混合
- * 3. 平滑过渡：使用 per 比例值实现颜色从 outgoingLight -> uColor -> outgoingLight 的渐变
- *
- * @param depth - 区域拉伸深度，用于归一化 z 坐标范围
- * @returns GLSL 代码字符串，插入到 fragmentShader 中替换默认光照计算
- */
-const outputFragment = function (depth: number): string {
-  return `
-  // 获取基础间接漫反射光照
-  vec3 outgoingLight = reflectedLight.indirectDiffuse;
-  
-  // 垂直渐变：根据 z 高度在黑色和浅蓝色之间插值，模拟天空光
-  vec3 gradient = mix(vec3(0,0,0),vec3(0.9,0.9,1.0), vPosition.z/${depth}.0);
-  outgoingLight = outgoingLight*gradient;
-  
-  // 计算扫光带的当前位置 y = 起始位置 + 时间 * 速度
-  float y = uStart + uTime * uSpeed;
-  float h = uHeight / 1.0; // 扫光带高度
-  
-  // 如果顶点在扫光带范围内 [y, y+h]，则与高亮颜色混合
-  if(vPosition.z > y && vPosition.z < y + h * 1.0) {
-      float per = 0.0; // 混合比例
-      if(vPosition.z < y + h){
-          // 上升阶段：从原始颜色渐变到高亮色
-          per = (vPosition.z - y) / h;
-          outgoingLight = mix(outgoingLight,uColor,per);
-      }else{
-          // 下降阶段：从高亮色渐变回原始颜色
-          per = (vPosition.z - y - h) / h;
-          outgoingLight = mix(uColor,outgoingLight,per);
-      }
-  }
-  
-  // 输出最终颜色（保持原始 alpha 通道）
-  diffuseColor = vec4( outgoingLight, diffuseColor.a );
-  `;
-};
+import { drawLabel } from './drawLabel';
+import { isNumber, rangeColor, separateColor, centerOfMass, deepMerge } from './helpers';
+import { SHIFT_FRAGMENT, SHIFT_VERTEX, applyShiftOptions, createShiftUniforms } from '../materials/shift';
+import { SURFACE_FRAGMENT, SURFACE_VERTEX, applySurfaceOptions, createSurfaceUniforms } from '../materials/surface';
+import { displayColor } from '../materials/color';
+import type { ThreeMapContext, ThreeMapOptions, GeoJsonFeature, GeoJsonProperties, MapConfig, DataItem, LabelOptions } from '../types';
 
 interface ShapeDataItem {
   shape: THREE.Shape;
-  extrudeSettings: THREE.ExtrudeGeometryOptions;
-  material: THREE.MeshBasicMaterial;
-  materialSide: THREE.MeshBasicMaterial;
+  surfaceUniforms: Record<string, { value: any }>;
+  shiftUniforms: Record<string, { value: any }>;
+  material: THREE.ShaderMaterial;
+  materialSide: THREE.ShaderMaterial;
   _privateData: any;
   label: CSS2DObject | null;
-  scale: number;
 }
 
 /**
- * 辅助函数：批量构建拉伸几何体（ExtrudeGeometry）
+ * 单个多边形的挤出深度。
  *
- * 工作流程：
- * 1. 遍历 shapeData 数组中的每个区域数据
- * 2. 使用 THREE.ExtrudeGeometry 将 2D Shape 拉伸成 3D 几何体
- * 3. 创建 Mesh 并应用双材质 [顶面材质, 侧面材质]
- * 4. 应用旋转和缩放变换使几何体正确显示在地图上
- * 5. 附加自定义数据和标签引用
- *
- * @param shapeData - 包含 Shape、拉伸设置、材质、私有数据的数组
- * @returns THREE.Group - 包含所有区域 Mesh 的组
+ * 直接用世界单位：threemap 的投影 scale 会随容器变化，如果沿用「config.depth / scale」
+ * 的老算法，换个窗口尺寸地图厚薄就变了。改成由「地图宽度 × 厚度比」算出来，
+ * 和 demo 的 1.6 / 30.018 完全等价，且跟容器无关。
  */
-const drawShapeAssist = function (shapeData: ShapeDataItem[]): THREE.Group {
-  const group = new THREE.Group();
-  shapeData.forEach((item) => {
-    const { shape, extrudeSettings, material, materialSide, _privateData, label, scale } = item;
+function resolveDepth(context: ThreeMapContext, config: MapConfig): number {
+  if (typeof context.mapDepth === 'number' && context.mapDepth > 0) {
+    return context.mapDepth;
+  }
+  return config.depth / config.scale;
+}
 
-    // ExtrudeGeometry 将 2D Shape 沿 Z 轴拉伸，生成带厚度的 3D 几何体
-    const geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
-
-    // 双材质数组：[0] 用于顶面和底面，[1] 用于侧面
-    const district = new THREE.Mesh(geometry, [material, materialSide]) as any;
-
-    // 标记类型方便后续 raycaster 拾取判断
-    district._type = "district";
-    district._privateData = _privateData; // 存储区域属性、颜色、高亮配置等
-
-    // 绕 X 轴旋转 -90度，将 XY 平面转为 XZ 平面（Three.js 默认 Y 轴向上）
-    district.rotation.x = -0.5 * Math.PI;
-
-    // Z 轴缩放 2/scale，调整拉伸高度以匹配地图比例
-    district.scale.set(1, 1, 2 / scale);
-
-    // 关联 CSS2D 标签的 DOM 元素，用于高亮时访问
-    label && (district._label = label.element);
-
-    group.add(district);
+/** 顶面/底面共用的 surface 材质 */
+function createSurfaceMaterial(uniforms: Record<string, { value: any }>): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    uniforms,
+    vertexShader: SURFACE_VERTEX,
+    fragmentShader: SURFACE_FRAGMENT,
+    transparent: true,
+    side: THREE.DoubleSide,
   });
-  return group;
-};
+}
+
+/** 侧面（挤出体立面）材质 */
+function createShiftMaterial(uniforms: Record<string, { value: any }>): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    uniforms,
+    vertexShader: SHIFT_VERTEX,
+    fragmentShader: SHIFT_FRAGMENT,
+    transparent: true,
+    side: THREE.DoubleSide,
+  });
+}
 
 /**
- * 创建侧面材质 - 应用扫光动画 Shader
+ * 用「整图包围盒」重写 UV。
  *
- * Shader 注入原理：
- * 1. 使用 onBeforeCompile 钩子在编译前修改 Three.js 内置 shader
- * 2. 在 vertexShader 中传递 vPosition 到 fragmentShader
- * 3. 在 fragmentShader 中注入自定义 uniform 变量和扫光逻辑
- * 4. 替换默认光照计算为 outputFragment 生成的扫光代码
- *
- * Uniform 变量说明：
- * - uTime: 动画时间（0-2 循环），每帧累加 deltaTime
- * - uHeight: 扫光带高度（depth/2）
- * - uColor: 扫光高亮颜色（科技蓝）
- * - uStart: 扫光起始位置（-depth/2，从底部开始）
- * - uSpeed: 扫光移动速度（depth/4，深度越大速度越快）
- *
- * @param color - 侧面基础颜色
- * @param uColor - 扫光高亮颜色
- * @param config - 地图配置（包含 depth）
- * @returns { mapUf: Uniform 对象引用, materialSide: 编译后的材质 }
+ * 这是整套视觉能和贴图对齐的关键：demo 里的贴图是整张郑州路网，
+ * 每个区县必须按自己在整图中的位置去采样同一张图，而不是各自铺满。
+ * 所以 UV = (local - bbox.min) / bbox.size，整图共用一套归一化。
  */
-const createSideMaterial = function (color: string, uColor: string, config: MapConfig): { mapUf: MapUniform; materialSide: THREE.MeshBasicMaterial } {
-  const { depth } = config;
+function applyGlobalUV(geometry: THREE.BufferGeometry, box: { minX: number; minY: number; width: number; height: number }): void {
+  const pos = geometry.getAttribute('position');
+  const uv = new Float32Array(pos.count * 2);
+  for (let i = 0; i < pos.count; i++) {
+    uv[i * 2] = (pos.getX(i) - box.minX) / box.width;
+    uv[i * 2 + 1] = (pos.getY(i) - box.minY) / box.height;
+  }
+  geometry.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+}
 
-  // 创建 Uniform 变量对象，动画循环时会修改 uTime.value
-  const mapUf: MapUniform = {
-    uTime: { value: 0.0 }, // 当前动画时间
-    uHeight: { value: depth / 2 }, // 扫光带高度
-    uColor: { value: new THREE.Color(uColor) }, // 高亮颜色（RGB）
-    uStart: { value: -depth / 2 }, // 起始 Z 坐标（底部）
-    uSpeed: { value: Math.ceil(depth / 4) }, // 移动速度
-  };
+/**
+ * 区县边界线样式。
+ *
+ * demo 的「每个区县轮廓一条发光线」写在 `City.vue` 里（EdgesGeometry + Line）。
+ * 迁移时漏了这块，结果整张贴图铺下来、区县之间没有任何分界，看着就是一整块。
+ * 这里用同一套做法补回来：缩成一个 shape 的轮廓边，压在顶面上方一点。
+ */
+interface DistrictLineStyle {
+  color: THREE.Color;
+  opacity: number;
+}
 
-  // 解析颜色字符串获取 RGB 和 Alpha
-  const format = tinycolor(color);
-  const { r, g, b } = format.toRgb();
+/** 边界线浮在顶面上方的高度（相对厚度的比例）：太小会 z-fighting 闪烁，太大会像悬空 */
+const LINE_EPS_RATIO = 0.012;
 
-  // 创建基础材质（MeshBasicMaterial 无光照计算，性能更好）
-  const materialSide = new THREE.MeshBasicMaterial({
-    color: `rgb(${r},${g},${b})`,
+/** 悬浮时区县抬升到原厚度的多少倍（与 demo 的 City.vue 一致：group.scale.z → 1.5） */
+export const HOVER_SCALE_Z = 1.5;
+
+/**
+ * 把区县轮廓做成 EdgesGeometry 线。
+ *
+ * EdgesGeometry 会把三角化产生的内部边全部剔除（共面、夹角 0），
+ * 只留下真正的轮廓 —— 包括飞地、内环（洞）也都会留住。
+ */
+function createDistrictLine(shape: THREE.Shape, depth: number, style: DistrictLineStyle): THREE.LineSegments {
+  const flat = new THREE.ShapeGeometry(shape);
+  const edges = new THREE.EdgesGeometry(flat, 1);
+  flat.dispose();
+
+  const material = new THREE.LineBasicMaterial({
+    color: style.color.clone(),
     transparent: true,
-    opacity: format.getAlpha(),
+    opacity: style.opacity,
+    depthWrite: false,
+  });
+  // 入场淡入要按比例还原，先把基准透明度记在材质上
+  material.userData.baseOpacity = style.opacity;
+
+  const line = new THREE.LineSegments(edges, material) as any;
+  line._type = 'districtLine';
+  // 线不参与拾取：鼠标压在边界上时应该仍然拾到区县，否则会「点不到」
+  line.raycast = () => {};
+  line.position.z = depth * (1 + LINE_EPS_RATIO);
+  return line;
+}
+
+/**
+ * 批量构建拉伸几何体（ExtrudeGeometry）
+ *
+ * 关键点：
+ * - 上下盖共用 material-0（surface），侧面用 material-1（shift），和 demo 一致
+ * - 关闭斜角（bevelEnabled: false）：斜角会在轮廓边缘多出一圈窄面，
+ *   贴着贴图边界光带看就是一条毛边，demo 里也是关掉的
+ * - 挤出后按整图 bbox 重写 UV，保证贴图对齐
+ * - 每个区县包一层 cell（统一 -90° 旋转），顶面和边界线都挂在 cell 里，
+ *   悬浮时只推 cell.scale.z 就能整体抬厚 —— 和 demo 的 City.vue 结构完全对应
+ */
+const drawShapeAssist = function (
+  shapeData: ShapeDataItem[],
+  box: { minX: number; minY: number; width: number; height: number },
+  depth: number,
+  lineStyle: DistrictLineStyle | null,
+): { group: THREE.Group; cells: THREE.Group[] } {
+  const group = new THREE.Group();
+  const cells: THREE.Group[] = [];
+
+  shapeData.forEach((item) => {
+    const { shape, material, materialSide, _privateData, label } = item;
+
+    const geometry = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false });
+    applyGlobalUV(geometry, box);
+
+    const district = new THREE.Mesh(geometry, [material, materialSide]) as any;
+    district._type = 'district';
+    district._privateData = _privateData;
+
+    label && (district._label = label.element);
+
+    // cell 承担 -90° 旋转：几何体的局部 +Z（挤出方向）从此就是世界 +Y，
+    // 顶面 mesh 和边界线因此可以共用一套「z = 厚度」的坐标，抬升也只需要动 cell。
+    const cell = new THREE.Group() as any;
+    cell.rotation.x = -0.5 * Math.PI;
+    cell._targetZ = 1;
+    cell._scaleZ = 1;
+    cell.add(district);
+
+    if (lineStyle && lineStyle.opacity > 0) {
+      const lineMesh = createDistrictLine(shape, depth, lineStyle);
+      // 入场淡入要按比例还原透明度，挂在 cell 上直接取，不用每帧遍历场景树
+      cell._line = lineMesh;
+      cell.add(lineMesh);
+    }
+
+    district._cell = cell;
+    cells.push(cell);
+    group.add(cell);
   });
 
-  // onBeforeCompile: 在 shader 编译前注入自定义代码
-  materialSide.onBeforeCompile = (shader) => {
-    // 将自定义 uniform 合并到 shader.uniforms
-    shader.uniforms = {
-      ...shader.uniforms,
-      ...mapUf,
-    };
-
-    // 修改 Vertex Shader：声明 varying 变量传递顶点位置到 Fragment Shader
-    shader.vertexShader = shader.vertexShader.replace(
-      "void main() {",
-      `
-          varying vec3 vPosition; // 将 position 传递给 fragment shader
-          void main() {
-            vPosition = position; // 赋值顶点局部坐标
-        `,
-    );
-
-    // 修改 Fragment Shader：声明 varying 和 uniform 变量
-    shader.fragmentShader = shader.fragmentShader.replace(
-      "void main() {",
-      `
-          varying vec3 vPosition;  // 接收 vertex shader 传来的位置
-          uniform float uTime;     // 动画时间
-          uniform vec3 uColor;     // 高亮颜色
-          uniform float uSpeed;    // 扫光速度
-          uniform float uStart;    // 起始位置
-          uniform float uHeight;   // 扫光带高度
-          void main() {
-        `,
-    );
-
-    // 替换默认光照计算为扫光动画逻辑
-    const d = parseInt(String(config.depth / 2));
-    shader.fragmentShader = shader.fragmentShader.replace("vec3 outgoingLight = reflectedLight.indirectDiffuse;", outputFragment(d));
-  };
-
-  return { mapUf, materialSide };
+  return { group, cells };
 };
 
 interface DrawDistrictResult {
-  mapUf: MapUniform;
   meshGroup: THREE.Group;
   advanceMeshGroup: THREE.Group;
   districtData: GeoJsonProperties[];
+  surfaceMaterials: THREE.ShaderMaterial[];
+  shiftMaterials: THREE.ShaderMaterial[];
   _realShape: () => Promise<THREE.Group>;
   _cancelRealShape: () => void;
-  mapTexture: THREE.Texture | null;
 }
 
 /**
  * 构建区域数据 - 核心渲染函数
  *
- * 工作流程：
- * 1. 数据准备：解析颜色范围、映射 data 到 district，计算分段/渐变色阶
- * 2. GeoJSON 遍历：处理 Polygon 和 MultiPolygon 几何类型
- * 3. 坐标投影：将经纬度坐标通过 d3.geoMercator 转为屏幕坐标
- * 4. Shape 构建：使用 THREE.Shape 构造 2D 轮廓（moveTo/lineTo）
- * 5. 几何生成：
- *    - ShapeGeometry: 快速平面几何（低精度预览）
- *    - ExtrudeGeometry: 延迟创建的拉伸几何（高精度渲染）
- * 6. 材质应用：顶面材质、侧面扫光材质
- * 7. 纹理映射：计算 BoundingBox，UV 比例缩放，应用中性灰度纹理
- *
- * 返回值说明：
- * - meshGroup: 包含边界线和标签的组合
- * - advanceMeshGroup: 包含平面 ShapeGeometry Mesh 的组合（用于快速预览）
- * - districtData: 所有区域属性数组
- * - _realShape: 延迟创建函数，返回 ExtrudeGeometry 的 Promise
- * - mapTexture: 纹理对象引用
- * - mapUf: Uniform 对象，用于扫光动画控制
- *
- * @param data - 用户数据数组（district, value, color）
- * @param options - 系列配置（itemStyle, emphasis, label 等）
- * @param features - GeoJSON Feature 数组
- * @param config - 地图全局配置（depth, scale）
+ * 流程与 demo 对齐：
+ * 1. 把 GeoJSON 投影成 2D Shape，同时累计整图包围盒
+ * 2. 用整图包围盒归一化 UV（所有区县共用同一张贴图坐标）
+ * 3. 顶面 surface 材质（暗底路网 + 法线浮雕 + 轮廓光 + 中心压暗）
+ * 4. 侧面 shift 材质（底部深蓝 → 顶部亮青的水晶立面）
+ * 5. 延迟 17ms 生成 ExtrudeGeometry，先用平面预览顶上首帧
  */
-export const drawDistrict = function (this: ThreeMapContext, data: DataItem[], options: ThreeMapOptions, features: GeoJsonFeature[], config: MapConfig): DrawDistrictResult {
-  const projection = this.projection; // d3.geoMercator 投影函数
+export const drawDistrict = function (
+  this: ThreeMapContext,
+  data: DataItem[],
+  options: ThreeMapOptions,
+  features: GeoJsonFeature[],
+  config: MapConfig,
+): DrawDistrictResult {
+  const projection = this.projection;
   const itemStyle = options.itemStyle;
   const emphasis = options.emphasis;
+  const lineStyle = options.lineStyle;
   const seriesName = options.seriesName;
   const range = itemStyle.range;
 
+  // 区县边界线：demo 的 City.vue 里每个区县轮廓都有一条淡青发光线，
+  // 各区域的形状就是靠它区分开的。透明度在 demo 的 0.42 基础上提到 0.58 ——
+  // 底下这层是暗色路网贴图，0.42 在 1080p 屏上基本糊掉，看不清区县分界。
+  // 颜色跟随 lineStyle.color，配成透明色时整条线不建。
+  const lineFormat = tinycolor(lineStyle.color);
+  const lineRgb = lineFormat.toRgb();
+  const districtLineStyle: DistrictLineStyle | null =
+    lineFormat.getAlpha() > 0
+      ? {
+          color: new THREE.Color(`rgb(${lineRgb.r},${lineRgb.g},${lineRgb.b})`),
+          opacity: 0.58 * lineFormat.getAlpha(),
+        }
+      : null;
+
   // 色阶参数解析：如果开启 range.show，根据 value 计算颜色
-  let sc: string | null = null; // startColor
-  let ec: string | null = null; // endColor
+  let sc: string | null = null;
+  let ec: string | null = null;
   let min = Number.MIN_SAFE_INTEGER;
   let max = Number.MAX_SAFE_INTEGER;
   if (range.show) {
@@ -244,240 +233,121 @@ export const drawDistrict = function (this: ThreeMapContext, data: DataItem[], o
     max = range.max;
   }
 
-  // 构建 district -> DataItem 的映射表，并计算每个区域的显示颜色
   const dataMap = new Map<string, DataItem>();
   data.forEach((it) => {
     if (sc != null && ec != null) {
       const value = it.value;
-      let color: string;
-      // 分段色阶 vs 渐变色阶
-      if (range.mode === "separate") {
-        // 分段：根据 rules 匹配颜色
-        color = separateColor(value!, range.rules, ec);
-      } else {
-        // 渐变：在 [min, max] 范围内线性插值
-        color = rangeColor(sc, ec, min, max, value);
-      }
-      it.color = color;
+      it.color = range.mode === 'separate' ? separateColor(value!, range.rules, ec) : rangeColor(sc, ec, min, max, value);
     } else {
-      it.color = null; // 使用默认颜色
+      it.color = null;
     }
-    dataMap.set(it.district + "", it);
+    dataMap.set(it.district + '', it);
   });
 
-  const lineStyle = options.lineStyle;
-  const topColor = itemStyle.topColor; // 顶面颜色
-  const sideColor = itemStyle.sideColor; // 侧面基色
-  const uColor = itemStyle.uColor; // 扫光高亮色
+  const depth = resolveDepth(this, config);
 
-  // 解析边界线颜色
-  const lineColor = lineStyle.color;
-  const lineFormat = tinycolor(lineColor);
-  const lineRgb = lineFormat.toRgb();
-  const lineOpacity = lineFormat.getAlpha();
-  const _lineColor = `rgb(${lineRgb.r},${lineRgb.g},${lineRgb.b})`;
+  const meshGroup = new THREE.Group();
+  const advanceMeshGroup = new THREE.Group();
+  const districtData: GeoJsonProperties[] = [];
+  const shapeData: ShapeDataItem[] = [];
+  const surfaceMaterials: THREE.ShaderMaterial[] = [];
+  const shiftMaterials: THREE.ShaderMaterial[] = [];
 
-  // 创建侧面扫光材质，返回 Uniform 引用和材质对象
-  const { mapUf, materialSide } = createSideMaterial(sideColor, uColor, config);
-  let mapTexture: THREE.Texture | null = null;
-
-  const meshGroup = new THREE.Group(); // 快速组：线框 + 标签
-  const advanceMeshGroup = new THREE.Group(); // 预览组：ShapeGeometry 平面体
-
-  const { depth, scale } = config;
-  const z = (depth + 1) / scale; // Z 轴基准高度
-  const districtData: GeoJsonProperties[] = []; // 收集所有区域属性
-  const shapeData: ShapeDataItem[] = []; // 收集 ExtrudeGeometry 所需数据
-
-  // 遍历 GeoJSON features，每个 feature 代表一个省/市/区
-  features.forEach((feature) => {
-    let { geometry, properties } = feature;
-
-    districtData.push(properties); // 收集所有区域属性
-    properties.seriesName = seriesName;
-    const item = dataMap.get(properties.adcode + ""); // 匹配用户数据
-
-    let { coordinates } = geometry;
-
-    // 合并 properties 和用户 data，用户数据优先级更高
-    properties = deepMerge({} as any, properties, item || {});
-
-    // 绘制区域名称标签（CSS2DObject）
-    const label = drawDistrictName.call(this, item ? item : undefined, options.label, properties, feature, options.config);
-    label && meshGroup.add(label);
-
-    // 处理 Polygon 和 MultiPolygon 两种几何类型
-    // Polygon: [[x,y],[x,y],...]
-    // MultiPolygon: [[[x,y],[x,y],...], [[x,y],[x,y],...]]
-    if (geometry.type === "Polygon") {
-      coordinates = [coordinates]; // 统一转为 MultiPolygon 格式
-    }
-
+  // 第一遍：投影所有点，算出整图包围盒
+  const box = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+  const projectFeature = (feature: GeoJsonFeature): number[][][] => {
+    let coordinates: any = feature.geometry.coordinates;
+    if (feature.geometry.type === 'Polygon') coordinates = [coordinates];
+    const rings: number[][][] = [];
     coordinates.forEach((multiPolygon: any) => {
       multiPolygon.forEach((polygon: number[][]) => {
-        const shape = new THREE.Shape(); // 创建 2D 轮廓 Shape
-
-        // 创建边界线材质
-        const lineMaterial = new THREE.LineBasicMaterial({
-          color: _lineColor,
-          transparent: true,
-          opacity: lineOpacity,
-        });
-
-        const points: THREE.Vector3[] = []; // 用于 LineGeometry
-
-        // 遍历多边形的每个顶点
+        const ring: number[][] = [];
         for (let i = 0; i < polygon.length; i++) {
-          // 将经纬度 [lng, lat] 投影到屏幕坐标 [x, y]
           const [x, y] = projection(polygon[i] as [number, number]);
-
-          // 第一个点使用 moveTo，后续点使用 lineTo 连接成闭合图形
-          if (i === 0) {
-            shape.moveTo(x, -y); // Y 轴反转（地理坐标系 -> Three.js 坐标系）
-          }
-          if (x && y) {
-            shape.lineTo(x, -y); // 构建 Shape 路径
-            points.push(new THREE.Vector3(x, -y, z)); // 构建边界线顶点
-          }
+          if (!x || !y) continue;
+          ring.push([x, -y]);
+          if (x < box.minX) box.minX = x;
+          if (x > box.maxX) box.maxX = x;
+          if (-y < box.minY) box.minY = -y;
+          if (-y > box.maxY) box.maxY = -y;
         }
-
-        // 使用顶点数组创建线条几何体
-        const lineGeometry = new THREE.BufferGeometry().setFromPoints(points);
-
-        // ExtrudeGeometry 拉伸设置：深度 + 斜角参数
-        const extrudeSettings: THREE.ExtrudeGeometryOptions = {
-          depth: depth / 2, // 拉伸深度（为 depth 的一半，后续缩放 2x）
-          bevelEnabled: true, // 启用斜角
-          bevelSegments: 10, // 斜角分段数，增加圆滑度
-          bevelThickness: 0.1, // 斜角厚度
-        };
-
-        // 决定顶面颜色：用户 data 中的 color > 默认 topColor
-        const color = item && item.color ? item.color : topColor;
-        const polygonFormat = tinycolor(color);
-        const { r, g, b } = polygonFormat.toRgb();
-
-        // 创建顶面/底面材质（MeshBasicMaterial 无光照）
-        const material = new THREE.MeshBasicMaterial({
-          color: `rgb(${r},${g},${b})`,
-          transparent: true,
-          opacity: polygonFormat.getAlpha(),
-        });
-
-        // 构建私有数据对象，存储于 Mesh._privateData 用于交互
-        const _privateData: any = {
-          ...properties,
-          deriveColor: color, // 计算后的颜色
-          textStyle: options.label.itemStyle.textStyle, // 标签样式
-        };
-
-        // 缓存 emphasis 配置，显示与否由 emphasisEnabled 控制
-        _privateData["emphasisColor"] = emphasis.topColor; // hover 时的颜色
-        _privateData["emphasisText"] = emphasis.textStyle; // hover 时的文字样式
-        _privateData["emphasisEnabled"] = emphasis.show;
-
-        // 将数据收集到 shapeData，用于延迟创建 ExtrudeGeometry
-        shapeData.push({
-          shape,
-          extrudeSettings,
-          material,
-          materialSide,
-          label: label || null,
-          scale,
-          _privateData,
-        });
-
-        // 创建快速预览版本：ShapeGeometry 平面体（不带厚度）
-        const shapeGeo = new THREE.ShapeGeometry(shape);
-        const district = new THREE.Mesh(shapeGeo, material) as any;
-        district._type = "shape_district"; // 标记为平面版本
-        district._privateData = _privateData;
-
-        // 旋转到 XZ 平面并抬高到区域拉伸的顶部
-        district.rotation.x = -0.5 * Math.PI;
-        district.position.y = depth / scale; // 抬高到顶部
-
-        label && (district._label = label.element);
-        advanceMeshGroup.add(district); // 加入预览组
-
-        // 创建边界线 Mesh
-        const line = new THREE.Line(lineGeometry, lineMaterial) as any;
-        line.rotation.x = -0.5 * Math.PI;
-        line._type = "districtLine";
-        lineOpacity > 0 && meshGroup.add(line); // 只在不透明时添加
+        rings.push(ring);
       });
+    });
+    return rings;
+  };
+
+  const allRings = features.map((feature) => projectFeature(feature));
+  const bbox = {
+    minX: box.minX,
+    minY: box.minY,
+    width: Math.max(1e-6, box.maxX - box.minX),
+    height: Math.max(1e-6, box.maxY - box.minY),
+  };
+  // 世界宽度缓存：飞线宽度、光柱尺寸等都按「地图宽度的比例」换算，跨地图才一致
+  this.mapBox = bbox;
+
+  // 第二遍：建 Shape + 材质
+  features.forEach((feature, featureIndex) => {
+    const { properties } = feature;
+    districtData.push(properties);
+    properties.seriesName = seriesName;
+    const item = dataMap.get(properties.adcode + '');
+
+    // 绘制区域名称标签（CSS2DObject）
+    const label = drawDistrictName.call(this, item ? item : undefined, options.label, properties, feature, config);
+    label && meshGroup.add(label);
+
+    const rings = allRings[featureIndex]!;
+    rings.forEach((ring) => {
+      if (ring.length < 3) return;
+      const shape = new THREE.Shape();
+      ring.forEach((point, i) => {
+        const x = point[0]!;
+        const y = point[1]!;
+        if (i === 0) shape.moveTo(x, y);
+        else shape.lineTo(x, y);
+      });
+
+      // 色阶开启时每个区域用自己的数据色；否则交给顶面配置里的铺色
+      const color = item && item.color ? item.color : options.surface.mapColor;
+      const surfaceUniforms = createSurfaceUniforms({ ...options.surface, mapColor: color });
+      const shiftUniforms = createShiftUniforms(depth, options.side);
+      const material = createSurfaceMaterial(surfaceUniforms);
+      const materialSide = createShiftMaterial(shiftUniforms);
+
+      const _privateData: any = {
+        ...deepMerge({} as any, properties, item || {}),
+        deriveColor: color,
+        textStyle: options.label.itemStyle.textStyle,
+      };
+      _privateData['emphasisColor'] = emphasis.topColor;
+      _privateData['emphasisText'] = emphasis.textStyle;
+      _privateData['emphasisEnabled'] = emphasis.show;
+
+      const meshRef: any = { surfaceUniforms, shiftUniforms };
+      material.userData.district = meshRef;
+      materialSide.userData.district = meshRef;
+
+      surfaceMaterials.push(material);
+      shiftMaterials.push(materialSide);
+
+      shapeData.push({ shape, surfaceUniforms, shiftUniforms, material, materialSide, label: label || null, _privateData });
+
+      // 快速预览版本：ShapeGeometry 平面体（不带厚度）
+      const shapeGeo = new THREE.ShapeGeometry(shape);
+      applyGlobalUV(shapeGeo, bbox);
+      const preview = new THREE.Mesh(shapeGeo, material) as any;
+      preview._type = 'shape_district';
+      preview._privateData = _privateData;
+      preview.rotation.x = -0.5 * Math.PI;
+      preview.position.y = depth;
+      label && (preview._label = label.element);
+      advanceMeshGroup.add(preview);
     });
   });
 
-  // ==================== 纹理映射：计算 UV 缩放并应用纹理 ====================
-  if (options.texture && options.texture.show) {
-    // 计算 advanceMeshGroup 的包围盒，获取整个地图的边界
-    const box = new THREE.Box3().setFromObject(advanceMeshGroup);
-    const boxMin = box.min;
-    const boxMax = box.max;
-
-    // 计算 UV 缩放比例：1 / 地图宽度，1 / 地图高度
-    // 这样纹理会铺满整个地图区域
-    const uvScale = new THREE.Vector2(1 / (boxMax.x - boxMin.x), 1 / (boxMax.z - boxMin.z));
-
-    // 缓存 uvScale 到上下文，避免切换地图时重复计筗
-    if (this.refresh) {
-      this.uvScale = uvScale;
-    }
-
-    if (!mapTexture) {
-      let scaleX = 1;
-      let scaleY = 1;
-      const { repeat, autoRepeat, offset } = options.texture;
-
-      // 加载纹理图片：自定义图片 or 默认灰度纹理
-      if (options.texture.image !== "default") {
-        const image = options.texture.image;
-        const texture = new THREE.TextureLoader().load(image);
-        mapTexture = texture;
-      } else {
-        mapTexture = staticTexture; // 使用预加载的 china_tintable_hc.png
-      }
-
-      // 自动重复 vs 手动设置重复次数
-      if (autoRepeat) {
-        const { x, y } = repeat;
-        scaleX = x;
-        scaleY = y;
-      } else {
-        // 使用计算的 UV 缩放，纹理铺满整个地图
-        scaleX = this.uvScale!.x;
-        scaleY = this.uvScale!.y;
-      }
-
-      // 纹理配置：
-      mapTexture.flipY = true; // Y 轴翻转（匹配地理坐标系）
-      mapTexture.wrapS = THREE.RepeatWrapping; // 水平重复
-      mapTexture.wrapT = THREE.RepeatWrapping; // 垂直重复
-      mapTexture.repeat.set(scaleX, scaleY); // 设置重复次数
-      mapTexture.offset.set(offset.x, offset.y); // 偏移量
-    }
-
-    // 将纹理应用到所有区域 Mesh 的 material.map
-    advanceMeshGroup.children.forEach((district: any) => {
-      district.material.map = mapTexture;
-      district.material.needsUpdate = true; // 通知 Three.js 重新编译 shader
-    });
-  }
-
-  // isClearRef 用于检查地图是否已被销毁，避免延迟创建时执行已销毁的操作
   const isClearRef = this;
-
-  /**
-   * 延迟创建 ExtrudeGeometry - 避免卡顿，提升首屏渲染速度
-   *
-   * 延迟策略：
-   * - 立即显示 ShapeGeometry（平面版，性能高）
-   * - 17ms 后异步创建 ExtrudeGeometry（拉伸版，计算量大）
-   * - ThreeMap.ts 中会调用该函数，用 ExtrudeGeometry 替换 ShapeGeometry
-   *
-   * @returns Promise<THREE.Group> - 包含所有 ExtrudeGeometry Mesh 的 Group
-   */
   let _realShapeTimerId: ReturnType<typeof setTimeout> | null = null;
 
   const _realShape = (): Promise<THREE.Group> => {
@@ -486,11 +356,11 @@ export const drawDistrict = function (this: ThreeMapContext, data: DataItem[], o
       _realShapeTimerId = setTimeout(() => {
         _realShapeTimerId = null;
         if (!isClearRef.isClear) {
-          // 调用 drawShapeAssist 批量构建 ExtrudeGeometry
-          const group = drawShapeAssist(shapeData);
+          const { group, cells } = drawShapeAssist(shapeData, bbox, depth, districtLineStyle);
+          // 悬浮抬升要逐帧 lerp，缓存一份 cell 列表，省得每帧遍历整棵树
+          isClearRef.districtCells = cells;
           resolve(group);
         } else {
-          // 已销毁，返回空 Group
           resolve(new THREE.Group());
         }
       }, 17);
@@ -504,16 +374,19 @@ export const drawDistrict = function (this: ThreeMapContext, data: DataItem[], o
     }
   };
 
-  return { mapUf, meshGroup, advanceMeshGroup, districtData, _realShape, _cancelRealShape, mapTexture };
+  return { meshGroup, advanceMeshGroup, districtData, surfaceMaterials, shiftMaterials, _realShape, _cancelRealShape };
 };
 
 /**
- * 更新区域材质与纹理（不重新构建几何体）
+ * 更新区域材质（不重新构建几何体）
+ *
+ * 全部走 uniform：纹理/法线组合、贴图染色、侧面配色都是改值，
+ * 不重建材质也不重编译着色器，所以面板拖动是实时的。
  */
 export const updateDistrictMaterials = function (this: ThreeMapContext, data: DataItem[], options: ThreeMapOptions): void {
   if (!this.seriesGroup) return;
 
-  const { itemStyle, lineStyle, outLineStyle, emphasis, texture, label } = options;
+  const { itemStyle, lineStyle, outLineStyle, emphasis, surface, side } = options;
   const range = itemStyle.range;
 
   let sc: string | null = null;
@@ -530,93 +403,54 @@ export const updateDistrictMaterials = function (this: ThreeMapContext, data: Da
   const dataMap = new Map<string, DataItem>();
   data.forEach((it) => {
     if (sc != null && ec != null) {
-      const value = it.value;
-      let color: string;
-      if (range.mode === "separate") {
-        color = separateColor(value!, range.rules, ec);
-      } else {
-        color = rangeColor(sc, ec, min, max, value);
-      }
-      it.color = color;
+      it.color = range.mode === 'separate' ? separateColor(it.value!, range.rules, ec) : rangeColor(sc, ec, min, max, it.value);
     } else {
       it.color = null;
     }
-    dataMap.set(it.district + "", it);
+    dataMap.set(it.district + '', it);
   });
 
   const lineFormat = tinycolor(lineStyle.color);
   const lineRgb = lineFormat.toRgb();
-  const lineOpacity = lineFormat.getAlpha();
   const nextLineColor = `rgb(${lineRgb.r},${lineRgb.g},${lineRgb.b})`;
+  const lineOpacity = lineFormat.getAlpha();
 
   const outlineFormat = tinycolor(outLineStyle.color);
   const outlineRgb = outlineFormat.toRgb();
-  const outlineOpacity = outlineFormat.getAlpha();
   const nextOutlineColor = `rgb(${outlineRgb.r},${outlineRgb.g},${outlineRgb.b})`;
-
-  const sideFormat = tinycolor(itemStyle.sideColor);
-  const sideRgb = sideFormat.toRgb();
-  const sideOpacity = sideFormat.getAlpha();
-  const nextSideColor = `rgb(${sideRgb.r},${sideRgb.g},${sideRgb.b})`;
-
-  if (this.mapUf) {
-    this.mapUf.uColor.value = new THREE.Color(itemStyle.uColor);
-  }
-
-  const textureTargets: THREE.MeshBasicMaterial[] = [];
-  const materialToDispose = new Set<THREE.Texture>();
-
-  const applyTopMaterial = (material: THREE.MeshBasicMaterial, color: string): void => {
-    const polygonFormat = tinycolor(color);
-    const { r, g, b } = polygonFormat.toRgb();
-    material.color.set(`rgb(${r},${g},${b})`);
-    material.opacity = polygonFormat.getAlpha();
-  };
+  const outlineOpacity = outlineFormat.getAlpha();
 
   this.seriesGroup.traverse((obj: any) => {
-    if (obj._type === "district") {
-      const item = dataMap.get(obj._privateData?.adcode + "");
-      const topColor = item && item.color ? item.color : itemStyle.topColor;
-      applyTopMaterial(obj.material[0], topColor);
-
-      obj.material[1].color.set(nextSideColor);
-      obj.material[1].opacity = sideOpacity;
-
-      obj._privateData.deriveColor = topColor;
-      obj._privateData.textStyle = label.itemStyle.textStyle;
+    if (obj._type === 'district' || obj._type === 'shape_district') {
+      const item = dataMap.get(obj._privateData?.adcode + '');
+      const color = item && item.color ? item.color : surface.mapColor;
+      obj._privateData.deriveColor = color;
+      obj._privateData.textStyle = options.label.itemStyle.textStyle;
       obj._privateData.emphasisColor = emphasis.topColor;
       obj._privateData.emphasisText = emphasis.textStyle;
       obj._privateData.emphasisEnabled = emphasis.show;
 
-      if (obj._label) {
-        (obj._label as HTMLElement).style.display = label.show ? "" : "none";
+      const uniforms = Array.isArray(obj.material) ? obj.material[0]?.uniforms : obj.material?.uniforms;
+      applySurfaceOptions(uniforms, { ...surface, mapColor: color });
+
+      if (Array.isArray(obj.material) && obj.material[1]) {
+        const sideUniforms = obj.material[1].uniforms;
+        // 挤出深度可能随「地图深度」一起变，这里同步一下，保证侧面渐变比例不变
+        sideUniforms.depth.value = obj.material[1].userData.extrudeDepth ?? sideUniforms.depth.value;
+        applyShiftOptions(sideUniforms, side);
       }
 
-      textureTargets.push(obj.material[0]);
-    } else if (obj._type === "shape_district") {
-      const item = dataMap.get(obj._privateData?.adcode + "");
-      const topColor = item && item.color ? item.color : itemStyle.topColor;
-      applyTopMaterial(obj.material, topColor);
-
-      obj._privateData.deriveColor = topColor;
-      obj._privateData.textStyle = label.itemStyle.textStyle;
-      obj._privateData.emphasisColor = emphasis.topColor;
-      obj._privateData.emphasisText = emphasis.textStyle;
-      obj._privateData.emphasisEnabled = emphasis.show;
-
       if (obj._label) {
-        (obj._label as HTMLElement).style.display = label.show ? "" : "none";
+        (obj._label as HTMLElement).style.display = options.label.show ? '' : 'none';
       }
-
-      textureTargets.push(obj.material);
-    } else if (obj._type === "districtLine") {
+    } else if (obj._type === 'districtLine') {
       obj.material.color.set(nextLineColor);
       obj.material.opacity = lineOpacity;
       obj.material.needsUpdate = true;
-    } else if (obj._type === "label" && obj._isDistrict) {
-      obj.visible = label.show;
+    } else if (obj._type === 'label' && obj._isDistrict) {
+      obj.visible = options.label.show;
       if (obj.element) {
-        obj.element.style.display = label.show ? "" : "none";
+        obj.element.style.display = options.label.show ? '' : 'none';
       }
     } else if (obj._isGlow && obj.material && obj.material.isLineBasicMaterial) {
       obj.material.color.set(nextOutlineColor);
@@ -624,136 +458,148 @@ export const updateDistrictMaterials = function (this: ThreeMapContext, data: Da
       obj.material.needsUpdate = true;
     }
   });
+};
 
-  if (texture && texture.show) {
-    let mapTexture: THREE.Texture | null = null;
-    let scaleX = 1;
-    let scaleY = 1;
-
-    if (texture.image !== "default") {
-      mapTexture = new THREE.TextureLoader().load(texture.image);
-    } else {
-      mapTexture = staticTexture;
+/** 顶面/侧面时间动画（法线流光 + 侧面呼吸 + 悬浮抬升） */
+export const districtAnimate = function (this: ThreeMapContext, deltaTime: number): void {
+  const surfaceMaterials = this.surfaceMaterials;
+  if (surfaceMaterials) {
+    for (let i = 0; i < surfaceMaterials.length; i++) {
+      const u = surfaceMaterials[i]!.uniforms;
+      if (u.time) u.time.value += deltaTime / 3;
     }
+  }
+  const shiftMaterials = this.shiftMaterials;
+  if (shiftMaterials) {
+    for (let i = 0; i < shiftMaterials.length; i++) {
+      const u = shiftMaterials[i]!.uniforms;
+      if (u.time) u.time.value += deltaTime / 3;
+    }
+  }
 
-    if (texture.autoRepeat) {
-      const { x, y } = texture.repeat;
-      scaleX = x;
-      scaleY = y;
-    } else {
-      let uvScale = this.uvScale;
-      if (!uvScale) {
-        const box = new THREE.Box3();
-        let hasDistrict = false;
-        this.seriesGroup.traverse((obj: any) => {
-          if (obj._type === "district" || obj._type === "shape_district") {
-            box.expandByObject(obj);
-            hasDistrict = true;
-          }
-        });
-        if (hasDistrict) {
-          uvScale = new THREE.Vector2(1 / (box.max.x - box.min.x), 1 / (box.max.z - box.min.z));
-          this.uvScale = uvScale;
+  // 悬浮抬升：cell.scale.z 插值追 target。
+  // demo 是 `group.scale.lerp(target, 0.1)`（每帧固定系数），这里用 0.18 稍快一点，
+  // 鼠标快速划过时不会留一串「半抬起来」的区县。
+  const cells = this.districtCells;
+  if (cells) {
+    for (let i = 0; i < cells.length; i++) {
+      const cell = cells[i] as any;
+      if (!cell) continue;
+      const target = cell._targetZ ?? 1;
+      const current = cell._scaleZ ?? 1;
+      const diff = target - current;
+      if (Math.abs(diff) < 0.002) {
+        if (current !== target) {
+          cell._scaleZ = target;
+          cell.scale.z = target;
         }
+        continue;
       }
-      if (uvScale) {
-        scaleX = uvScale.x;
-        scaleY = uvScale.y;
-      }
+      const next = current + diff * LEAP_LERP;
+      cell._scaleZ = next;
+      cell.scale.z = next;
     }
-
-    mapTexture.flipY = true;
-    mapTexture.wrapS = THREE.RepeatWrapping;
-    mapTexture.wrapT = THREE.RepeatWrapping;
-    mapTexture.repeat.set(scaleX, scaleY);
-    mapTexture.offset.set(texture.offset.x, texture.offset.y);
-
-    textureTargets.forEach((material) => {
-      if (material.map && material.map !== mapTexture && material.map !== staticTexture) {
-        materialToDispose.add(material.map);
-      }
-      material.map = mapTexture;
-      material.needsUpdate = true;
-    });
-  } else {
-    textureTargets.forEach((material) => {
-      if (material.map && material.map !== staticTexture) {
-        materialToDispose.add(material.map);
-      }
-      material.map = null;
-      material.needsUpdate = true;
-    });
-  }
-
-  materialToDispose.forEach((tex) => tex.dispose());
-};
-
-/**
- * 侧边动画
- */
-export const districtAnimate = function (this: ThreeMapContext, mapUf: MapUniform | undefined): boolean | void {
-  if (!mapUf) return false;
-  const deltaTime = this.clock.getDelta();
-  mapUf.uTime.value += deltaTime;
-  if (mapUf.uTime.value >= 2) {
-    mapUf.uTime.value = 0.0;
   }
 };
 
+/** 抬升插值速度（每帧靠拢比例） */
+const LEAP_LERP = 0.18;
+
+/** 取区县顶面材质的 uniforms（挤出体是双材质数组，顶面在 material-0） */
+function surfaceUniformsOf(mesh: any): Record<string, { value: any }> | undefined {
+  const material = Array.isArray(mesh?.material) ? mesh.material[0] : mesh?.material;
+  return material?.uniforms;
+}
+
+/** 把一套 CSS 文本样式写到标签元素上 */
+function applyLabelStyle(element: HTMLElement, style: Record<string, any>): void {
+  Object.keys(style).forEach((key: string) => {
+    if (isNumber(style[key])) {
+      (element.style as any)[key] = style[key] + 'px';
+    } else if (Array.isArray(style[key])) {
+      (element.style as any)[key] = style[key].join('px ') + 'px';
+    } else {
+      (element.style as any)[key] = style[key];
+    }
+  });
+}
+
+/** 复位一个区县的高亮（厚度落回 1、顶面高亮归零、标签回到常态样式） */
+function resetDistrictEmphasis(mesh: any): void {
+  if (!mesh || mesh._type !== 'district') return;
+
+  const cell = mesh._cell;
+  if (cell) cell._targetZ = 1;
+
+  const uniforms = surfaceUniformsOf(mesh);
+  if (uniforms?.highlight) uniforms.highlight.value = 0;
+
+  const textStyle = mesh._privateData?.textStyle;
+  if (textStyle && mesh._label) applyLabelStyle(mesh._label as HTMLElement, textStyle);
+}
+
+/** 上一帧的鼠标指针形态，避免每帧重复写 style */
+let cursorState = '';
+
 /**
- * 区域渲染（hover效果）
+ * 区域渲染（悬浮高亮）
+ *
+ * 顶面是 ShaderMaterial，没有 color 属性可以直接改，所以高亮走两条独立通道：
+ *   ① 几何 —— cell.scale.z 从 1 抬到 1.5，区县整块「顶起来」（demo 同款）
+ *   ② 颜色 —— 推动 surface 的 highlight/highlightColor uniform，在片元里按明暗投色
+ * 两条都不重建材质、不重编译着色器，鼠标划过是零开销的。
  */
 export const districtRender = function (this: ThreeMapContext): void {
   const { raycaster, scene } = this;
 
+  // 复位上一次悬停的区县
   if (this.pickDistrictMesh) {
-    const mesh = this.pickDistrictMesh.object as any;
-    mesh.material[0].opacity = mesh.material[0]._opacity;
-    if (mesh._type === "district") {
-      const { deriveColor, textStyle } = mesh._privateData;
-      const polygonFormat = tinycolor(deriveColor);
-      const { r, g, b } = polygonFormat.toRgb();
-      mesh.material[0].color.set(`rgb(${r},${g},${b})`);
+    resetDistrictEmphasis(this.pickDistrictMesh.object);
+    this.pickDistrictMesh = null;
+  }
 
-      if (mesh._label) {
-        const ele = mesh._label as HTMLElement;
-        Object.keys(textStyle).forEach((key: string) => {
-          if (isNumber(textStyle[key])) {
-            (ele.style as any)[key] = textStyle[key] + "px";
-          } else if (Array.isArray(textStyle[key])) {
-            (ele.style as any)[key] = textStyle[key].join("px ") + "px";
-          } else {
-            (ele.style as any)[key] = textStyle[key];
-          }
-        });
-      }
+  const intersects = raycaster.intersectObjects(scene.children, true);
+  const hits = intersects.filter((it: any) => it.object._type === 'district' || it.object._type === 'scatter');
+  const picked = hits[0]?.object as any;
+
+  if (!picked || picked._type !== 'district') {
+    if (cursorState !== '') {
+      document.body.style.cursor = '';
+      cursorState = '';
+    }
+    return;
+  }
+
+  this.pickDistrictMesh = hits[0]!;
+
+  const { emphasisColor, emphasisText, emphasisEnabled } = picked._privateData || {};
+  if (!emphasisEnabled) {
+    if (cursorState !== '') {
+      document.body.style.cursor = '';
+      cursorState = '';
+    }
+    return;
+  }
+
+  // ① 厚度抬升
+  const cell = picked._cell;
+  if (cell) cell._targetZ = HOVER_SCALE_Z;
+
+  // ② 顶面高亮
+  const uniforms = surfaceUniformsOf(picked);
+  if (uniforms?.highlight) {
+    uniforms.highlight.value = 1;
+    if (uniforms.highlightColor) {
+      uniforms.highlightColor.value.copy(displayColor(emphasisColor || '#73f8ff'));
     }
   }
-  this.pickDistrictMesh = null;
-  const intersects = raycaster.intersectObjects(scene.children, true);
-  const r = intersects.filter((it: any) => it.object._type === "district" || it.object._type === "scatter");
 
-  if (r.length && (r[0]!.object as any)._type === "district") {
-    this.pickDistrictMesh = r[0]!;
-    const mesh = this.pickDistrictMesh.object as any;
-    mesh.material[0]._opacity = mesh.material[0].opacity;
+  // ③ 标签切到悬浮样式
+  if (emphasisText && picked._label) applyLabelStyle(picked._label as HTMLElement, emphasisText);
 
-    const { emphasisColor, emphasisText, emphasisEnabled } = mesh._privateData;
-    if (emphasisEnabled && emphasisColor) {
-      mesh.material[0].color.set(emphasisColor);
-    }
-    if (emphasisEnabled && emphasisText && mesh._label) {
-      const ele = mesh._label as HTMLElement;
-      Object.keys(emphasisText).forEach((key: string) => {
-        if (isNumber(emphasisText[key])) {
-          (ele.style as any)[key] = emphasisText[key] + "px";
-        } else if (Array.isArray(emphasisText[key])) {
-          (ele.style as any)[key] = emphasisText[key].join("px ") + "px";
-        } else {
-          (ele.style as any)[key] = emphasisText[key];
-        }
-      });
-    }
+  if (cursorState !== 'pointer') {
+    document.body.style.cursor = 'pointer';
+    cursorState = 'pointer';
   }
 };
 
@@ -779,22 +625,22 @@ function drawDistrictName(
 
   let now = new Date().getTime();
   let isDbl = false;
-  label.addEventListener("pointerdown", (e: PointerEvent) => {
+  label.addEventListener('pointerdown', (e: PointerEvent) => {
     e.stopPropagation();
     e.preventDefault();
-    
+
     const clickTime = new Date().getTime();
     if (clickTime - now < 300) {
       isDbl = true;
-      if (this.events["dblclick"]) {
-        this.events["dblclick"].forEach((cb) => {
+      if (this.events['dblclick']) {
+        this.events['dblclick'].forEach((cb) => {
           cb(properties);
         });
       }
     } else {
       setTimeout(() => {
-        if (!isDbl && this.events["click"]) {
-          this.events["click"].forEach((cb) => {
+        if (!isDbl && this.events['click']) {
+          this.events['click'].forEach((cb) => {
             cb(properties);
           });
         }
@@ -805,10 +651,10 @@ function drawDistrictName(
   });
 
   const name = new CSS2DObject(label) as any;
-  const { depth, scale } = config;
-  const z = (depth + 1) / scale;
+  // 标签压在顶面上方一点，和 demo 的 depth + 0.2（局部）/ 0.5 等价
+  const z = (this.mapDepth || 0) + (this.mapWorldWidth || 10) * 0.0067;
   name.position.set(x, z, y);
-  name._type = "label";
+  name._type = 'label';
   name._isDistrict = true;
   name.visible = options.show;
   return name;

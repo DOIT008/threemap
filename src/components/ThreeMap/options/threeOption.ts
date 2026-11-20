@@ -38,8 +38,8 @@ const createDefaultOptions = (): ThreeMapOptions => {
       disableRotate: false, // 是否禁用鼠标旋转控制
       disableZoom: false, // 是否禁用鼠标缩放控制
       autoScaleFactor: 1, // 自动缩放的额外系数（1 = 原始大小）
-      scale: 100, // 地图整体缩放比例
-      depth: 35, // 区域拉伸高度（ExtrudeGeometry 的挤出深度）
+      scale: 100, // 自动缩放关闭时的投影缩放比例
+      depth: 53, // 区域厚度（千分比：53 = 地图宽度的 5.3%，与 demo 的 1.6/30.018 等价）
     },
     // ========== 自动旋转配置 ==========
     autoRotate: {
@@ -47,10 +47,11 @@ const createDefaultOptions = (): ThreeMapOptions => {
       autoRotateSpeed: 2, // 自动旋转速度（度/秒）
     },
     // ========== 相机位置配置 ==========
+    // 只当「方向」用：真实距离由地图宽度换算（见 ThreeMap.setCamera）
     camera: {
-      x: 0.8, // 相机 X 轴位置（乘以地图缩放系数）
-      y: 6, // 相机 Y 轴位置（高度）
-      z: 3, // 相机 Z 轴位置（深度）
+      x: -0.8, // 相机 X 轴方向
+      y: 10.2, // 相机 Y 轴方向（高度）
+      z: 5.3, // 相机 Z 轴方向（纵深）
     },
     // ========== 网格辅助线配置 ==========
     grid: {
@@ -96,7 +97,7 @@ const createDefaultOptions = (): ThreeMapOptions => {
     },
     // ========== 镜面反射配置 ==========
     mirror: {
-      show: false, // 是否显示镜面反射效果（在地图下方渲染翻转的副本）
+      show: true, // 是否显示镜面反射效果（在地图下方渲染翻转的副本）
       color: ["#020B1F", "#00D2FF"], // 镜面渐变色：[底部颜色, 顶部颜色]
     },
     // ========== 边界墙体配置 ==========
@@ -114,11 +115,11 @@ const createDefaultOptions = (): ThreeMapOptions => {
       image: "default", // 纹理图片（'default' 使用内置纹理）
     },
     // ========== 地图数据配置 ==========
-    map: "100000", // 地图区域代码（100000 = 中国）
-    mapName: "china", // 地图名称标识
+    map: "410100", // 地图区域代码（410100 = 郑州市）
+    mapName: "zhengzhou", // 地图名称标识
     // ========== Bloom 辉光后处理配置 ==========
     glow: {
-      show: true, // 是否启用 Bloom 效果
+      show: false, // 是否启用 Bloom 效果（demo 没有辉光，开了会把颜色推白）
       threshold: 0, // 发光阈值（亮度低于此值的不会发光）
       strength: 1, // 发光强度
       radius: 0, // 发光扩散半径
@@ -165,17 +166,22 @@ const createDefaultOptions = (): ThreeMapOptions => {
     },
     // ========== 鼠标悬停高亮配置 ==========
     emphasis: {
-      show: false, // 是否启用悬停高亮效果
-      topColor: "#73F8FF", // 悬停时的顶面颜色
+      // 悬停高亮：区县整块抬厚 1.5 倍 + 顶面按明暗投一层高亮色。
+      // demo 的 City.vue 就是这个交互（group.scale.z → 1.5），默认开，
+      // 不然鼠标划过地图一点反馈都没有，也分不清自己指到了哪个区县。
+      show: true, // 是否启用悬停高亮效果
+      topColor: "#73F8FF", // 悬停时的顶面高亮色
       textStyle: {
-        // 悬停时的文本样式（用于标签）
-        fontSize: 12,
-        color: "#FFF",
+        // 悬停时的文本样式（用于标签）：
+        // 必须比常态更「跳」——常态 13px/淡蓝，悬停放大到 15px 并加强光晕，
+        // 否则鼠标指过去文字反而变暗变小，看着像 bug
+        fontSize: 15,
+        color: "#FFFFFF",
         fontStyle: "normal",
-        fontWeight: "normal",
+        fontWeight: "bold",
         fontFamily: "Microsoft Yahei",
         textDecoration: "",
-        textShadow: "",
+        textShadow: "0 0 8px rgba(150, 220, 255, 1), 0 0 18px rgba(80, 170, 255, 0.85)",
       },
     },
     // ========== 边界线样式配置 ==========
@@ -183,12 +189,56 @@ const createDefaultOptions = (): ThreeMapOptions => {
       color: "#78CFFF", // 区域内部边界线颜色（如省内市界）
     },
     outLineStyle: {
+      // 贴图自带的边界发光已经完整，再叠一条描线会在外沿夹出一条暗带
+      show: false, // 是否显示外轮廓描线
       color: "rgba(83, 198, 230, 1)", // 区域外部轮廓线颜色（如省界）
     },
     // ========== 区域标签配置 ==========
     label: {
       ...label, // 继承默认标签配置
-      show: true, // 默认不显示区域标签（避免地图过于拥挤）
+      show: true, // 是否显示区域标签
+      itemStyle: {
+        ...label.itemStyle,
+        // 与 demo 的 .map-label 同一套：淡蓝白字 + 双层光晕，入场动画结束后才出现
+        textStyle: {
+          ...label.itemStyle.textStyle,
+          fontSize: 13,
+          color: "#d7ebff",
+          letterSpacing: "1px",
+          textShadow: "0 0 6px rgba(120, 190, 255, 0.9), 0 0 14px rgba(60, 130, 230, 0.6)",
+        },
+      },
+    },
+    // ========== 顶面材质（demo 的 ShapeBox 那套）==========
+    surface: {
+      mapMode: "image", // 'image' 图片贴图 | 'color' 纯色铺色
+      mapColor: "#0d2340", // 纯色模式的铺色
+      tintColor: "#ffffff", // 图片模式的染色色相，白色 = 不改色
+      tintStrength: 0, // 0 = 原图色相，1 = 完全换成 tintColor
+      normalMap: true, // 法线贴图浮雕
+      edgeGlow: true, // 贴图 alpha 距离场做的轮廓光带
+      reliefStrength: 0.45, // 浮雕强度
+      glowLevel: 1, // 轮廓光整体倍率
+      centerDark: 0.34, // 中心压暗（让四周边缘更跳）
+      mapTex: null, // 自定义贴图，null 用内置暗底路网
+    },
+    // ========== 侧面材质（挤出体立面，与顶面完全独立）==========
+    side: {
+      bottomColor: "#0a2952", // 底部深蓝
+      topColor: "#6fb0d8", // 顶部亮青
+      stripeColor: "#d8f0ff", // 顶沿亮线 / 水晶条纹高光
+      stripeScale: 3.2, // 条纹密度
+      stripeStrength: 0.82, // 条纹强度
+      tintColor: "#ffffff", // 染色色相，白色 = 保持冰蓝
+      tintStrength: 0, // 0 = 冰蓝，1 = 完全换成 tintColor
+    },
+    // ========== 场景特效开关 ==========
+    scene: {
+      groundRing: true, // 地面光圈
+      beams: true, // 漂浮光柱
+      cones: true, // 区县标点（光锥 + 光环）
+      trail: true, // 沿轮廓的描边跑光
+      intro: true, // 入场动画
     },
     // ========== 系列和数据配置 ==========
     seriesName: "map", // 主地图系列名称

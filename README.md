@@ -23,6 +23,14 @@
     - [构建生产包](#构建生产包)
   - [组件使用](#组件使用)
     - [核心类 `ThreeMap` 所有功能都包含在该类（自定义集成）](#核心类-threemap--所有功能都包含在该类自定义集成)
+  - [调参 → 上线：主题固化](#调参--上线主题固化)
+    - [1. 在面板里调好](#1-在面板里调好)
+    - [2. 点「导出配置」](#2-点导出配置)
+    - [3. 粘进项目，关掉面板](#3-粘进项目关掉面板)
+    - [组件 Props](#组件-props)
+    - [只写想改的字段](#只写想改的字段)
+    - [关于面板的代码体积](#关于面板的代码体积)
+    - [业务数据怎么进](#业务数据怎么进)
   - [配置项（Options）详解](#配置项options详解)
     - [config — 地图基础配置](#config--地图基础配置)
     - [camera — 相机位置](#camera--相机位置)
@@ -158,6 +166,91 @@ onBeforeUnmount(() => {
   map = null
 })
 </script>
+```
+
+---
+
+## 调参 → 上线：主题固化
+
+控制面板只用于**开发期调参**，上线时不需要（也不应该）带进项目。流程分三步：
+
+### 1. 在面板里调好
+
+访问 `/?panel=0` 可以随时看到「不上线面板」时的真实效果（等价于 `:panel="false"`）。
+调参时建议加 `?freeze=1` 冻结飞线、光柱、光圈等所有时间型动画，画面静止，方便逐项比对改动。
+
+### 2. 点「导出配置」
+
+面板右上角的 **导出配置** 按钮会把当前视觉配置导出成一段 TS 源码：
+
+- 内容只含**渲染配置**：颜色、厚度、相机、材质、特效开关等
+- **不含业务数据**：`data`、`series[].data` 都会被清空
+- 不含函数：`formatter` 之类无法序列化的成员会被剔除
+
+点击后配置直接进剪贴板；若在 http 非安全上下文（比如局域网 IP 访问）拿不到剪贴板权限，会自动下载成 `map-theme.ts`。
+
+### 3. 粘进项目，关掉面板
+
+把导出的代码存成 `src/components/ThreeMap/options/myTheme.ts`，然后：
+
+```vue
+<template>
+  <div style="width: 100%; height: 100%">
+    <ThreeMap :option="myTheme" :panel="false" area="410100" area-name="郑州" />
+  </div>
+</template>
+
+<script setup lang="ts">
+import ThreeMap from "@/components/ThreeMap/index.vue";
+import myTheme from "@/components/ThreeMap/options/myTheme";
+</script>
+```
+
+导出的文件里 `import` 路径是 `@/components/ThreeMap/options/theme`，如果 `ThreeMap` 目录不在 `@/components` 下，改一下这行路径即可。
+
+### 组件 Props
+
+| 参数 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `option` | `ThreeMapTheme \| null` | `null` | 面板导出的主题，**深合并**覆盖默认值，只需写想改的字段 |
+| `panel` | `boolean` | `true` | 是否渲染调参面板。生产环境传 `false` |
+| `legend` | `boolean` | `true` | 是否渲染色阶图例（数据展示用，与面板无关） |
+| `area` | `string` | `'410100'` | 初始行政区划代码 |
+| `areaName` | `string` | `'郑州'` | 初始地图名称 |
+
+### 只写想改的字段
+
+`option` 是深合并，不必导出整份配置。手写主题时按需覆盖即可：
+
+```ts
+import type { ThreeMapTheme } from "@/components/ThreeMap/options/theme";
+
+const myTheme: ThreeMapTheme = {
+  config: { depth: 40 },
+  camera: { x: -0.5, y: 11, z: 6 },
+  surface: { normalMap: false, centerDark: 0.5 },
+  side: { topColor: "#8fd8ff" },
+  scene: { beams: false },
+};
+```
+
+数组（如 `mirror.color`、`surface` 以外的 `series`）是**整体替换**，不做逐项合并。
+
+### 关于面板的代码体积
+
+`ControlPanel.vue` 通过 `defineAsyncComponent` 按需加载，`:panel="false"` 时这个 chunk 不会被请求，产物里不包含面板代码。
+
+### 业务数据怎么进
+
+主题只负责「长什么样」，数据仍然走 `series`。飞线、柱体、散点等具体数据用 `options.series` 或底层 `ThreeMap` 类自己填，例如：
+
+```ts
+// 主题里的 series 只保留样式，data 自己给
+const options = mergeOptions(createDefaultOptions(), myTheme);
+options.series = [
+  { ...createFlight(), seriesName: "flight-1", data: [{ start: "410102", end: "410185" }] },
+];
+map.setOption(options);
 ```
 
 ---

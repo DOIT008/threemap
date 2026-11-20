@@ -1,14 +1,45 @@
 ﻿<script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from "vue";
+import { ref, computed, watch, defineAsyncComponent, onMounted, onBeforeUnmount } from "vue";
 import ThreeMap from "./ThreeMap";
-import ControlPanel from "./ControlPanel.vue";
 import createDefaultOptions from "./options/threeOption";
+import { mergeOptions, extractTheme, themeToTS, type ThreeMapTheme } from "./options/theme";
 import createMarker from "./options/createMarker";
 import createFlight from "./options/createFlight";
 import createPrism from "./options/createPrism";
 import createScatter from "./options/createScatter";
 import createCylinder from "./options/createCylinder";
 import type { ThreeMapOptions, GeoJsonFeatureCollection } from "./types";
+
+/**
+ * 控制面板是开发期调参工具，异步加载：
+ * :panel="false" 时这块代码连 chunk 都不会被请求，产物里也就不会带面板。
+ */
+const ControlPanel = defineAsyncComponent(() => import("./ControlPanel.vue"));
+
+// ==================== Props ====================
+/**
+ * 组件的对外参数。
+ * - option：面板调好后导出的主题，深合并覆盖默认值。不传就是内置的郑州默认效果。
+ * - panel：是否渲染调参面板。项目里上线时传 false，面板只是开发期工具。
+ * - legend：是否渲染色阶图例（数据映射的图例，属于数据展示，可单独控制）。
+ * - area / areaName：初始地图行政区划代码与名称。
+ */
+const props = withDefaults(
+  defineProps<{
+    option?: ThreeMapTheme | null;
+    panel?: boolean;
+    legend?: boolean;
+    area?: string;
+    areaName?: string;
+  }>(),
+  {
+    option: null,
+    panel: true,
+    legend: true,
+    area: "410100",
+    areaName: "郑州",
+  },
+);
 
 // ==================== Types ====================
 interface AreaProp {
@@ -24,8 +55,9 @@ interface MapListItem {
 
 type SeriesType = "marker" | "flight" | "prism" | "scatter" | "cylinder";
 
-const areaRef = ref<AreaProp>({ area: "100000", name: "中国" });
-const threeOptionsRef = ref<ThreeMapOptions>(createDefaultOptions());
+const areaRef = ref<AreaProp>({ area: props.area, name: props.areaName });
+const threeOptionsRef = ref<ThreeMapOptions>(mergeOptions(createDefaultOptions(), props.option));
+
 
 // ==================== Refs ====================
 const mapRef = ref<HTMLDivElement | null>(null);
@@ -121,19 +153,14 @@ function createdDataRandom(mapJson: GeoJsonFeatureCollection, type: string): any
   // 每次生成的数据量与地图区域数量一致
   const features = getRandomFeatures(mapJson,mapJson.features.length);
   if (type === "flight") {
-    if (features.length < 2) return [];
-    const codes: string[] = [];
-    features.forEach((it) => {
-      codes.push(it.properties.adcode as string);
-    });
-    const end = codes[Math.floor(Math.random() * codes.length)]!;
+    if (mapJson.features.length < 2) return [];
+    // 和 demo 一致：从第一个区县（中心城区）放射到其余每一个区县
+    const center = mapJson.features[0]!.properties.adcode as string;
     const line: { start: string; end: string }[] = [];
-    for (let i = 0; i < codes.length; i++) {
-      const start = codes[i]!;
-      if (start !== end) {
-        line.push({ start, end });
-      }
-    }
+    mapJson.features.forEach((it) => {
+      const code = it.properties.adcode as string;
+      if (code !== center) line.push({ start: center, end: code });
+    });
     return line;
   } else {
     const res: any[] = [];
@@ -199,6 +226,52 @@ function handleInChangeMap(code: string, mapName: string): void {
       reset();
     });
   }
+}
+
+/**
+ * 加载指定行政区划代码的地图并渲染。首次进入和外部切换主题里的 map 都走这里。
+ */
+function loadMap(code: string, name: string): void {
+  if (!map) return;
+
+  loading.value = true;
+  isInHole.value = false;
+  mapList.value = [];
+
+  (threeOptionsRef.value as any).map = code;
+  (threeOptionsRef.value as any).mapName = name;
+
+  // demo 的地图自带一组「中心放射」飞线，默认就给一条，进页面即是同款观感
+  if (!threeOptionsRef.value.series.length) {
+    const flight = createFlight();
+    flight.seriesName = "flight-1";
+    threeOptionsRef.value.series.push(flight);
+  }
+
+  map
+    .registerMap(code, code, threeOptionsRef.value.config)
+    .then((mapJson) => {
+      currentMapJson.value = mapJson;
+
+      mapList.value.push({
+        name,
+        value: code,
+        mapJson: mapJson,
+      });
+
+      threeOptionsRef.value.series.forEach((it: any) => {
+        if (!it.data || !it.data.length) {
+          it.data = createdDataRandom(mapJson, it.type);
+        }
+      });
+
+      init();
+      loading.value = false;
+    })
+    .catch((err: unknown) => {
+      console.error("地图加载失败:", err);
+      loading.value = false;
+    });
 }
 
 /**
@@ -273,43 +346,80 @@ function regenerateSeriesData(index: number): void {
   applyPanelChanges();
 }
 
+// ==================== 主题导出 ====================
+const exportTip = ref("");
+let exportTipTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** 面板右下角的一次性提示 */
+function showExportTip(text: string): void {
+  exportTip.value = text;
+  if (exportTipTimer) clearTimeout(exportTipTimer);
+  exportTipTimer = setTimeout(() => {
+    exportTip.value = "";
+  }, 2600);
+}
+
+/** 无剪贴板权限时的兜底：直接存成文件 */
+function downloadText(text: string, filename: string): void {
+  const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * 把面板里调好的视觉配置导出成 TS 源码。
+ * 优先写剪贴板；http 局域网等非安全上下文拿不到 clipboard 权限时退化成下载文件。
+ */
+async function handleExportTheme(): Promise<void> {
+  const code = themeToTS(extractTheme(threeOptionsRef.value));
+  try {
+    await navigator.clipboard.writeText(code);
+    showExportTip("配置已复制到剪贴板，粘进项目即可");
+  } catch (error) {
+    console.warn("剪贴板不可用，改为下载文件:", error);
+    downloadText(code, "map-theme.ts");
+    showExportTip("已下载 map-theme.ts");
+  }
+}
+
 // ==================== Lifecycle ====================
+// 外部换主题：整份 options 重算，map 变了要重新加载底图，其余直接重绘
+watch(
+  () => props.option,
+  (next) => {
+    const prevCode = threeOptionsRef.value.map;
+    threeOptionsRef.value = mergeOptions(createDefaultOptions(), next);
+    if (!map) return;
+
+    const nextCode = threeOptionsRef.value.map;
+    if (nextCode !== prevCode) {
+      loadMap(nextCode, threeOptionsRef.value.mapName || props.areaName);
+    } else {
+      reset();
+    }
+  },
+);
+
 onMounted(() => {
   map = new ThreeMap(mapRef.value!, tooltipRef.value!);
 
-  const { area, name } = areaRef.value;
-  const code = area;
+  // 调试开关：URL 带 ?freeze=1 时冻结所有 time 型动画（飞线流光、光柱漂移、
+  // 光圈自转、顶点流光、侧面条纹），画面完全静止。
+  // 逐项核对配置面板是否生效时需要稳定的基准画面，否则动画相位差
+  // 会淹没掉「改颜色只影响几 % 像素」这类弱信号。正常访问不受影响。
+  if (new URLSearchParams(window.location.search).has("freeze")) {
+    map.setFrozen(true);
+  }
 
-  (threeOptionsRef.value as any).map = area;
-  (threeOptionsRef.value as any).mapName = name;
-
-  map
-    .registerMap(code, code, threeOptionsRef.value.config)
-    .then((mapJson) => {
-      currentMapJson.value = mapJson;
-
-      mapList.value.push({
-        name,
-        value: code,
-        mapJson: mapJson,
-      });
-
-      threeOptionsRef.value.series.forEach((it: any) => {
-        if (!it.data || !it.data.length) {
-          it.data = createdDataRandom(mapJson, it.type);
-        }
-      });
-
-      init();
-      loading.value = false;
-    })
-    .catch((err: unknown) => {
-      console.error("地图加载失败:", err);
-      loading.value = false;
-    });
+  loadMap(areaRef.value.area, areaRef.value.name);
 });
 
 onBeforeUnmount(() => {
+  if (exportTipTimer) clearTimeout(exportTipTimer);
   map && map.destroyMap();
   map = null;
 });
@@ -322,6 +432,7 @@ onBeforeUnmount(() => {
     <div ref="tooltipRef" class="dv-three-tooltip"></div>
 
     <ControlPanel
+      v-if="panel"
       :options="threeOptionsRef"
       :series-type-options="seriesTypeOptions"
       @apply="applyPanelChanges"
@@ -329,10 +440,11 @@ onBeforeUnmount(() => {
       @remove-series="removeSeries"
       @regenerate-series="regenerateSeriesData"
       @generate-data="generateMapData"
+      @export="handleExportTheme"
     />
 
     <!-- 视觉映射 -->
-    <div class="three-visual-wrap" v-if="range.show">
+    <div class="three-visual-wrap" v-if="range.show && legend">
       <div class="three-visual">
         <div class="three-visual-gradient" v-if="range.mode === 'range'">
           <div class="gradient" :style="getVisualMapColumnStyle"></div>
@@ -358,6 +470,9 @@ onBeforeUnmount(() => {
     <div class="back-three-map" @click="backMapFn" v-if="showBack">
       <span style="margin-right: 4px">返回上一级 </span>
     </div>
+
+    <!-- 导出提示 -->
+    <div v-if="exportTip" class="three-export-tip">{{ exportTip }}</div>
   </div>
 </template>
 
@@ -477,6 +592,23 @@ onBeforeUnmount(() => {
 
 .back-three-map:hover {
   background: rgba(0, 0, 0, 0.5);
+}
+
+/* ==================== 导出提示 ==================== */
+.three-export-tip {
+  position: absolute;
+  z-index: 1001;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 16px;
+  border-radius: 6px;
+  background: rgba(8, 32, 60, 0.92);
+  border: 1px solid rgba(72, 204, 255, 0.5);
+  color: #b7e9ff;
+  font-size: 13px;
+  letter-spacing: 0.5px;
+  pointer-events: none;
 }
 
 /* ==================== Canvas Label / Marker / Prism ==================== */
