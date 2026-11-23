@@ -69,6 +69,7 @@ const data = dashboard.videos;
 <style scoped lang="scss">
 .pd {
   position: relative;
+  box-sizing: border-box;
   width: 442px;
   height: 199px;
   flex: none;

@@ -85,6 +85,7 @@ onMounted(() => {
 <style scoped lang="scss">
 .pl {
   position: relative;
+  box-sizing: border-box;
   width: 895px;
   height: 192px;
   flex: none;

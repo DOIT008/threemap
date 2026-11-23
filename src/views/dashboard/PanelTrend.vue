@@ -140,6 +140,7 @@ const tipLeft = computed(() => {
 <style scoped lang="scss">
 .pt {
   position: relative;
+  box-sizing: border-box;
   width: 442px;
   height: 236px;
   flex: none;
@@ -178,7 +179,7 @@ const tipLeft = computed(() => {
 
   &__chart {
     position: relative;
-    margin-top: 30px;
+    margin-top: 28px;
 
     svg {
       display: block;

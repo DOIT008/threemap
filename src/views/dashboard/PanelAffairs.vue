@@ -73,6 +73,7 @@ const ICONS = [icon1, icon2, icon3, icon4, icon5];
 <style scoped lang="scss">
 .pa {
   position: relative;
+  box-sizing: border-box;
   width: 442px;
   height: 231px;
   flex: none;
@@ -145,7 +146,7 @@ const ICONS = [icon1, icon2, icon3, icon4, icon5];
 
   &__label {
     font-size: 12px;
-    line-height: 16px;
+    line-height: 14px;
     color: rgba(198, 231, 255, 0.75);
     white-space: nowrap;
   }
@@ -155,7 +156,7 @@ const ICONS = [icon1, icon2, icon3, icon4, icon5];
     font-family: Roboto, "Segoe UI", Arial, sans-serif;
     font-size: 20px;
     font-weight: 500;
-    line-height: 24px;
+    line-height: 22px;
     color: rgba(255, 255, 255, 1);
     text-shadow: 0 0 8px rgba(36, 160, 255, 0.45);
   }
@@ -164,7 +165,7 @@ const ICONS = [icon1, icon2, icon3, icon4, icon5];
     position: relative;
     width: 110px;
     height: 59px;
-    margin-top: -4px;
+    margin-top: -8px;
     animation: pa-float 3.2s ease-in-out infinite;
   }
 

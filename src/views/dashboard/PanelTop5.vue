@@ -77,6 +77,7 @@ function pct(value: number): number {
 <style scoped lang="scss">
 .p5 {
   position: relative;
+  box-sizing: border-box;
   width: 442px;
   height: 232px;
   flex: none;

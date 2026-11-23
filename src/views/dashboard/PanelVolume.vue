@@ -101,6 +101,7 @@ const segments = computed(() => {
 <style scoped lang="scss">
 .pv {
   position: relative;
+  box-sizing: border-box;
   width: 442px;
   height: 232px;
   flex: none;
@@ -163,7 +164,8 @@ const segments = computed(() => {
   &__body {
     display: flex;
     align-items: center;
-    height: 200px;
+    box-sizing: border-box;
+    height: 198px;
     padding: 6px 24px 0 14px;
   }
 

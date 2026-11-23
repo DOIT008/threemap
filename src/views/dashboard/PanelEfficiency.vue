@@ -91,6 +91,7 @@ const TICKS = [0, 20, 40, 60, 80, 100];
 <style scoped lang="scss">
 .pe {
   position: relative;
+  box-sizing: border-box;
   width: 442px;
   height: 266px;
   flex: none;

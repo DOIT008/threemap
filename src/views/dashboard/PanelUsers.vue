@@ -63,6 +63,7 @@ const ICON_SETS = [
 <style scoped lang="scss">
 .pu {
   position: relative;
+  box-sizing: border-box;
   width: 442px;
   height: 266px;
   flex: none;

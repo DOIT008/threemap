@@ -69,6 +69,7 @@ const PLATES = [cardRed, cardYellow, cardBlue];
 <style scoped lang="scss">
 .ps {
   position: relative;
+  box-sizing: border-box;
   width: 442px;
   height: 270px;
   flex: none;
