@@ -48,16 +48,84 @@ export function drawGroundRing(mapWidth: number): SceneLayer {
 }
 
 /**
- * 漂浮光柱：20 根细光条在大范围内缓慢上升，到顶后回到下方重新开始。
- * 大屏里那种「空气里的碎光」，很淡但让画面不死。
+ * 在多边形内部随机取一点（xz 平面，世界坐标）。
+ *
+ * 用「奇偶规则」把外环和洞一起算：穿越次数为奇即在内部。
+ * 一次拒绝采样最多试 80 轮，实在取不到（多边形退化）就返回 null 交给调用方兜底。
  */
-export function drawBeams(mapWidth: number): SceneLayer {
+function sampleInRings(rings: [number, number][][]): { x: number; z: number } | null {
+  if (!rings.length) return null;
+
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  rings.forEach((ring) =>
+    ring.forEach(([x, z]) => {
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (z < minZ) minZ = z;
+      if (z > maxZ) maxZ = z;
+    }),
+  );
+  if (!Number.isFinite(minX) || maxX <= minX || maxZ <= minZ) return null;
+
+  const inside = (x: number, z: number): boolean => {
+    let hit = false;
+    for (const ring of rings) {
+      for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const [xi, zi] = ring[i]!;
+        const [xj, zj] = ring[j]!;
+        if (zi > z !== zj > z && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) hit = !hit;
+      }
+    }
+    return hit;
+  };
+
+  for (let i = 0; i < 80; i++) {
+    const x = minX + Math.random() * (maxX - minX);
+    const z = minZ + Math.random() * (maxZ - minZ);
+    if (inside(x, z)) return { x, z };
+  }
+  return null;
+}
+
+/**
+ * 漂浮光柱：一堆细光条缓缓上升，到顶后回到下方重新开始。
+ * 大屏里那种「空气里的碎光」，很淡但让画面不死。
+ *
+ * region 传城市轮廓（世界坐标的 xz 环列表）时，光条只撒在轮廓以内；
+ * topY 传地图顶面高度，光条就只在顶面上方那层薄空气里飘。
+ *
+ * demo 是撒在 mapWidth × 1.33 的方框里（比地图本身还大一圈），并且从地面
+ * 一路升到 0.66~2 倍地图宽的高空 —— 那个高度早就飞出取景之外了。结果是
+ * 屏幕上看到一堆又长又直的青色光带横穿空白背景、和地图完全脱节，很容易
+ * 被误认成「没贴边的边缘流光」。所以这里把落点和高度都收进城市范围内。
+ */
+export function drawBeams(
+  mapWidth: number,
+  options: { region?: [number, number][][]; topY?: number } = {},
+): SceneLayer {
+  const { region, topY } = options;
   const group = new THREE.Group();
   const range = mapWidth * 1.33; // demo: 20 / 15
   const unit = mapWidth / 15; // demo 的世界尺度换算
   const geometry = new THREE.CylinderGeometry(0.03 * unit, 0.03 * unit, 1, 6, 1, true);
   const materials: THREE.ShaderMaterial[] = [];
   const beams: { mesh: THREE.Mesh; speed: number; resetHeight: number }[] = [];
+
+  // 撒点：优先落在城市轮廓内；取不到（没传 region / 多边形退化）才退回原来的方框
+  const spread = (): { x: number; z: number } =>
+    (region ? sampleInRings(region) : null) ?? {
+      x: (Math.random() - 0.5) * range,
+      z: (Math.random() - 0.5) * range,
+    };
+
+  // 活动高度带：贴着地图顶面往上一小段。
+  // 太矮会被顶面挡掉（additive + depthTest），太高又会飘回空白背景里。
+  const baseY = (topY ?? mapWidth * 0.072) + mapWidth * 0.004;
+  const bandHeight = unit * 1.8;
+  const beamLength = (): number => 0.9 + Math.random() * 1.3;
 
   for (let i = 0; i < 20; i++) {
     const material = new THREE.ShaderMaterial({
@@ -70,11 +138,16 @@ export function drawBeams(mapWidth: number): SceneLayer {
       blending: THREE.AdditiveBlending,
     });
     const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.set((Math.random() - 0.5) * range, (5 - Math.random() * 5) * unit, (Math.random() - 0.5) * range);
-    mesh.scale.set(1, 2 + Math.random() * 4, 1);
+    const start = spread();
+    mesh.position.set(start.x, baseY + Math.random() * bandHeight, start.z);
+    mesh.scale.set(1, beamLength(), 1);
     mesh.raycast = () => {};
     materials.push(material);
-    beams.push({ mesh, speed: 2 + Math.random(), resetHeight: (10 + Math.random() * 20) * unit });
+    beams.push({
+      mesh,
+      speed: 0.4 + Math.random() * 0.4,
+      resetHeight: baseY + bandHeight,
+    });
     group.add(mesh);
   }
 
@@ -84,10 +157,11 @@ export function drawBeams(mapWidth: number): SceneLayer {
       beams.forEach((beam) => {
         beam.mesh.position.y += beam.speed * delta * unit;
         if (beam.mesh.position.y > beam.resetHeight) {
-          beam.mesh.position.x = (Math.random() - 0.5) * range;
-          beam.mesh.position.z = (Math.random() - 0.5) * range;
-          beam.mesh.position.y = (1 - Math.random() * 5) * unit;
-          beam.mesh.scale.y = 2 + Math.random();
+          const next = spread();
+          beam.mesh.position.x = next.x;
+          beam.mesh.position.z = next.z;
+          beam.mesh.position.y = baseY + Math.random() * bandHeight * 0.15;
+          beam.mesh.scale.y = beamLength();
         }
       });
     },
@@ -172,11 +246,19 @@ export function drawCones(centers: THREE.Vector3[], topY: number, mapWidth: numb
 }
 
 /**
- * 描边跑光：沿城市外轮廓循环跑的一段亮光。
- * demo 里颜色极暗（additive 后几乎看不见），这里保持同样的克制强度，
- * 只在边缘留一点「活着」的感觉，不抢贴图自带的边界光。
+ * 边缘流光：沿城市外轮廓循环跑的一段亮光。
+ *
+ * 参数（速度 / 尾长 / 亮度）全部可从面板调 —— 默认值照 demo，
+ * 但跑光本身只有 1~2px 宽，不同地图、不同机位下观感差别不小，
+ * 交给使用者自己拧比硬编码一个「刚好」的值更实在。
  */
-export function drawTrail(context: ThreeMapContext, boundary: GeoJsonFeatureCollection, topY: number, mapWidth: number): SceneLayer | null {
+export function drawTrail(
+  context: ThreeMapContext,
+  boundary: GeoJsonFeatureCollection,
+  topY: number,
+  mapWidth: number,
+  options: { speed?: number; length?: number; brightness?: number } = {},
+): SceneLayer | null {
   const projection = context.projection;
   const feature = boundary.features[0];
   if (!feature) return null;
@@ -197,7 +279,11 @@ export function drawTrail(context: ThreeMapContext, boundary: GeoJsonFeatureColl
   best.forEach((coord) => {
     const [x, y] = projection(coord as [number, number]);
     if (!x || !y) return;
-    points.push(new THREE.Vector3(x, topY, -y));
+    // z 用 +y：和区县填充、轮廓描线、区县标点是同一套约定。
+    // 这里曾经写成 -y，结果整条流光变成「地图轮廓按 z 轴镜像」——
+    // 它跑在一条不存在的镜像路径上，看着就是地图实体外面飘着一条
+    // 和边缘形状相似、但整体错开的亮线（用户反馈的「没紧贴地图边缘」）。
+    points.push(new THREE.Vector3(x, topY, y));
   });
   // 闭合
   if (points.length && points[0]!.distanceTo(points[points.length - 1]!) > 1e-6) {
@@ -205,18 +291,25 @@ export function drawTrail(context: ThreeMapContext, boundary: GeoJsonFeatureColl
   }
   if (points.length < 3) return null;
 
+  const speedSeconds = Math.max(1, options.speed ?? 10);
+  const tail = Math.min(1, Math.max(0.03, options.length ?? 0.3));
+  const brightness = Math.max(0.05, options.brightness ?? 1);
+
   const geometry = buildRibbonGeometry(points, 2);
   const uniforms = {
     // demo 的 GeoTrail 用的是 `new Color(2, 10, 10)` —— 通道值远超 1 的 HDR 色。
-    // 这不是随手写的：跑光本身只有 0.1 世界单位宽（屏幕上 1~2px），
-    // 用普通色（0.6 亮度）叠在已经有一圈轮廓光的地图边上根本看不出来。
-    // 必须给足亮度，让它自己「爆」出来。
-    color: { value: new THREE.Color(2, 10, 10) },
+    // demo 那道光只有 1~2px 宽，整条过曝成一根细白线才好看；这里的带宽有几像素，
+    // 若按原亮度整条都会是实心白带（看着像被人擦掉一段），所以压到 0.16 倍：
+    // 中心仍然过曝成白，两侧由 section 衰减回轮廓的青色，才像「一道光扫过」。
+    color: { value: new THREE.Color(2, 10, 10).multiplyScalar(0.16 * brightness) },
     time: { value: 0 },
     opacity: { value: 0 },
-    speed: { value: 0.1 }, // 10 秒跑一圈（demo: t += delta / 10）
-    trailLength: { value: 0.3 }, // 尾长占整圈的比例（demo: 100 点 × 步长 3.3）
-    width: { value: mapWidth * 0.0033 }, // demo: lineWidth 0.1 / 30 局部宽
+    speed: { value: 1 / speedSeconds }, // 越小越慢（speed × 秒数 = 1 圈）
+    trailLength: { value: tail },
+    // 宽度按地图宽占比（ribbon 左右各一份，屏幕上总宽 ≈ 2×该值×视距补偿）。
+    // demo 是 0.1/30 ≈ 0.0033（屏幕 1~2px，几乎看不见）；放到 0.0042 约 5px，
+    // 看得清又不至于一半宽度甩到轮廓外的暗背景上（那样会显得「没沿边缘」）。
+    width: { value: mapWidth * 0.0042 },
     uRefDistance: { value: context.refDistance ?? mapWidth * 1.08 },
   };
   const material = new THREE.ShaderMaterial({
@@ -231,6 +324,10 @@ export function drawTrail(context: ThreeMapContext, boundary: GeoJsonFeatureColl
   const mesh = new THREE.Mesh(geometry, material);
   mesh.renderOrder = 10;
   mesh.raycast = () => {};
+  // 第 1 层：主相机可见，镜面倒影用的虚拟相机不可见。
+  // 地图是悬浮在镜面上方的，这道光只有几个像素宽又很亮，倒影会跑到轮廓之外的
+  // 空白处，看着就像「流光没沿着地图边缘」（本体其实是严格贴合的）。
+  mesh.layers.set(1);
 
   return {
     object: mesh,

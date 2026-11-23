@@ -265,6 +265,52 @@ function updateColorByHex(target: "topColor" | "sideColor" | "uColor" | "outLine
             <span class="panel-label">轮廓描线:</span>
             <input type="checkbox" v-model="props.options.outLineStyle.show" @change="emitApply" />
           </div>
+          <div class="panel-item toggle">
+            <span class="panel-label">边缘流光:</span>
+            <input type="checkbox" v-model="props.options.scene.trail" @change="emitApply" />
+          </div>
+          <div class="panel-item" :class="{ 'is-disabled': !props.options.scene.trail }">
+            <span class="panel-label">流光速度:</span>
+            <input
+              class="number-input"
+              type="number"
+              min="1"
+              max="60"
+              step="1"
+              title="跑完整圈所需秒数，越小越快"
+              :disabled="!props.options.scene.trail"
+              v-model.number="props.options.scene.trailSpeed"
+              @change="emitApply"
+            />
+          </div>
+          <div class="panel-item" :class="{ 'is-disabled': !props.options.scene.trail }">
+            <span class="panel-label">流光尾长:</span>
+            <input
+              class="number-input"
+              type="number"
+              min="0.03"
+              max="1"
+              step="0.05"
+              title="拖尾占整圈的比例，越大尾巴越长"
+              :disabled="!props.options.scene.trail"
+              v-model.number="props.options.scene.trailLength"
+              @change="emitApply"
+            />
+          </div>
+          <div class="panel-item" :class="{ 'is-disabled': !props.options.scene.trail }">
+            <span class="panel-label">流光亮度:</span>
+            <input
+              class="number-input"
+              type="number"
+              min="0.1"
+              max="4"
+              step="0.1"
+              title="亮度倍率，1 为默认"
+              :disabled="!props.options.scene.trail"
+              v-model.number="props.options.scene.trailBrightness"
+              @change="emitApply"
+            />
+          </div>
           <div class="panel-item">
             <span class="panel-label">地图深度:</span>
             <input class="number-input" type="number" v-model.number="props.options.config.depth" @change="emitApply" />
@@ -430,10 +476,6 @@ function updateColorByHex(target: "topColor" | "sideColor" | "uColor" | "outLine
           <div class="panel-item toggle">
             <span class="panel-label">区县标点:</span>
             <input type="checkbox" v-model="props.options.scene.cones" @change="emitApply" />
-          </div>
-          <div class="panel-item toggle">
-            <span class="panel-label">轮廓跑光:</span>
-            <input type="checkbox" v-model="props.options.scene.trail" @change="emitApply" />
           </div>
           <div class="panel-item toggle">
             <span class="panel-label">入场动画:</span>
@@ -634,6 +676,16 @@ function updateColorByHex(target: "topColor" | "sideColor" | "uColor" | "outLine
 
 .panel-item.toggle {
   justify-content: space-between;
+}
+
+/* 关联参数置灰：边缘流光关掉时，速度/尾长/亮度一起失效，
+   但仍然占位 —— 面板高度不跳动，画布也就不会跟着重排 */
+.panel-item.is-disabled {
+  opacity: 0.42;
+}
+
+.panel-item.is-disabled .number-input {
+  cursor: not-allowed;
 }
 
 .panel-label {

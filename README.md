@@ -31,6 +31,8 @@
     - [只写想改的字段](#只写想改的字段)
     - [关于面板的代码体积](#关于面板的代码体积)
     - [业务数据怎么进](#业务数据怎么进)
+    - [多路由 = 多套主题](#多路由--多套主题)
+    - [主题里的 map 字段](#主题里的-map-字段)
   - [配置项（Options）详解](#配置项options详解)
     - [config — 地图基础配置](#config--地图基础配置)
     - [camera — 相机位置](#camera--相机位置)
@@ -44,6 +46,7 @@
     - [wall — 电子围栏](#wall--电子围栏)
     - [texture — 地图贴图](#texture--地图贴图)
     - [autoRotate — 自动旋转](#autorotate--自动旋转)
+    - [scene — 场景特效](#scene--场景特效)
     - [emphasis — 高亮样式](#emphasis--高亮样式)
     - [lineStyle / outLineStyle — 边线](#linestyle--outlinestyle--边线)
   - [数据（data）格式](#数据data格式)
@@ -252,6 +255,47 @@ options.series = [
 ];
 map.setOption(options);
 ```
+
+### 多路由 = 多套主题
+
+每个路由页面 `import` 自己的主题传进去就行，效果互不影响：
+
+```ts
+// src/views/overview/index.vue
+import overviewTheme from "@/themes/overview";   // 面板导出的 A 套
+// <ThreeMap :option="overviewTheme" :panel="false" />
+
+// src/views/monitor/index.vue
+import monitorTheme from "@/themes/monitor";     // 面板导出的 B 套
+// <ThreeMap :option="monitorTheme" :panel="false" />
+```
+
+**为什么不会串味**：每次挂载都是 `createDefaultOptions()` 重新合并主题，主题之间不叠加、不残留。
+实测 A → B → A 连续切换后，画面平均色与原图完全一致。
+
+同理，同一个页面里切换主题也支持（`option` 有变化会自动重绘，底图不变时只重绘、不重建）：
+
+```ts
+const theme = computed(() => (isDark.value ? darkTheme : lightTheme));
+// <ThreeMap :option="theme" :panel="false" />
+```
+
+**两个注意点**：
+
+1. **不要给地图页加 `<keep-alive>`**。每个 `ThreeMap` 实例都带有自己的 `WebGLRenderer` 和渲染上下文，
+   浏览器对同时存在的 WebGL 上下文有上限（通常 16 个）；被缓存的页面不会释放，来回切几次就会报警甚至黑屏。
+   如果一定要缓存页面状态，用 `include` / `exclude` 把地图页排除掉。
+2. **一个页面只挂一个地图实例**。需要「分屏对比两套风格」时用截图或 `v-if` 二选一切换，不要同时挂两个。
+
+### 主题里的 map 字段
+
+导出的主题会带上 `map` / `mapName`（当时调参用的底图）。加载优先级是：
+
+```
+主题里的 map  →  props.area  →  默认 410100
+```
+
+也就是说主题里写了 `map`，就以主题为准；想复用同一套样式换个行政区，把主题里这两行删掉、改用 `:area="410300"` 即可。
 
 ---
 
@@ -490,6 +534,36 @@ emphasis: {
 ```
 
 ---
+
+### scene — 场景特效
+
+```ts
+scene: {
+  groundRing: true,        // 地面光圈（图片贴片，缓慢自转）
+  beams: true,             // 漂浮光柱
+  cones: true,             // 区县标点（光锥 + 光环）
+  trail: true,             // 边缘流光：沿城市外轮廓循环跑的一道光
+  trailSpeed: 10,          // 跑完整圈所需秒数，越小越快
+  trailLength: 0.3,        // 拖尾长度，占整圈的比例（0~1）
+  trailBrightness: 1,      // 亮度倍率，1 为默认
+  intro: true,             // 入场动画（相机推进 + 厚度生长 + 淡入）
+}
+```
+
+`trail` 的三个参数只影响边缘流光本身，关掉 `trail` 后它们无效（面板里会置灰）。
+默认值照 3D 郑州 demo：10 秒一圈、尾巴占 30%。想让光带更抢眼就调高 `trailBrightness`；
+想变成快速扫过的一小段，就把 `trailSpeed` 降到 3~5、`trailLength` 降到 0.1。
+
+> 流光只沿**最长的一圈**轮廓跑。多飞地城市（外轮廓由多个碎环组成）不会每个小环都跑一遍光。
+
+`beams`（漂浮光柱）和 demo 有一处刻意的差异：demo 把 20 根光条随机撒在
+`mapWidth × 1.33` 的方框里、并且从地面一路升到 0.66~2 倍地图宽的高空，
+结果是又长又直的光带横穿空白背景、和地图完全脱节，很容易被误认成
+「没贴边的边缘流光」。这里改成**只撒在城市轮廓以内**、并且只在**地图顶面上方
+那层薄空气**里浮动，落点用奇偶规则做多边形内判定（洞也一起算）。
+
+如果就想要 demo 那种满天碎光，把 `setEnvironment` 里的
+`region` / `topY` 两个参数去掉即可退回原行为。
 
 ### lineStyle / outLineStyle — 边线
 

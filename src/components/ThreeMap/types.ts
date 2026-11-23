@@ -266,8 +266,14 @@ export interface ThreeMapOptions {
     beams: boolean;
     /** 区县标点（光锥 + 光环） */
     cones: boolean;
-    /** 沿轮廓的描边跑光 */
+    /** 边缘流光：沿城市外轮廓循环跑的一道光 */
     trail: boolean;
+    /** 流光跑完整圈所需秒数（越小越快） */
+    trailSpeed: number;
+    /** 流光尾长，占整圈的比例（0~1，越大拖尾越长） */
+    trailLength: number;
+    /** 流光亮度倍率（1 = 默认；调大更亮更容易看见） */
+    trailBrightness: number;
     /** 入场动画（相机推进 + 厚度生长 + 淡入） */
     intro: boolean;
   };

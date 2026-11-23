@@ -19,7 +19,8 @@
     "d3-geo": "^3.1.1",
     "three": "^0.183.2",
     "tinycolor2": "^1.6.0",
-    "vue": "^3.5.31"
+    "vue": "^3.5.31",
+    "vue-router": "^5.5.1"
   },
   "devDependencies": {
     "@tsconfig/node24": "^24.0.4",

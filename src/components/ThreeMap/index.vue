@@ -42,11 +42,6 @@ const props = withDefaults(
 );
 
 // ==================== Types ====================
-interface AreaProp {
-  area: string;
-  name: string;
-}
-
 interface MapListItem {
   name: string;
   value: string;
@@ -55,9 +50,31 @@ interface MapListItem {
 
 type SeriesType = "marker" | "flight" | "prism" | "scatter" | "cylinder";
 
-const areaRef = ref<AreaProp>({ area: props.area, name: props.areaName });
-const threeOptionsRef = ref<ThreeMapOptions>(mergeOptions(createDefaultOptions(), props.option));
+/**
+ * 底图优先级：主题里显式写了 map 就用主题的，否则用 props.area。
+ * 一份主题 = 一张底图 + 一套样式，多个路由各传各的主题即可。
+ */
+function resolveArea(theme: ThreeMapTheme | null | undefined): { code: string; name: string } {
+  return {
+    code: theme?.map || props.area,
+    name: theme?.mapName || props.areaName,
+  };
+}
 
+/**
+ * 由主题生成一份完整 options。
+ * setOption 是拿 options.map 去查已注册的 geoJSON 的，所以这里必须把
+ * options.map / mapName 和实际要加载的底图对齐，否则会查不到而白屏。
+ */
+function buildOptions(theme: ThreeMapTheme | null | undefined): ThreeMapOptions {
+  const options = mergeOptions(createDefaultOptions(), theme);
+  const { code, name } = resolveArea(theme);
+  options.map = code;
+  options.mapName = name;
+  return options;
+}
+
+const threeOptionsRef = ref<ThreeMapOptions>(buildOptions(props.option));
 
 // ==================== Refs ====================
 const mapRef = ref<HTMLDivElement | null>(null);
@@ -241,8 +258,10 @@ function loadMap(code: string, name: string): void {
   (threeOptionsRef.value as any).map = code;
   (threeOptionsRef.value as any).mapName = name;
 
-  // demo 的地图自带一组「中心放射」飞线，默认就给一条，进页面即是同款观感
-  if (!threeOptionsRef.value.series.length) {
+  // demo 的地图自带一组「中心放射」飞线，默认补一条，进页面即是同款观感。
+  // 主题里显式给了 series（哪怕是空数组）就以主题为准，不再补 —— 这样
+  // 想做「只留底图」的极简主题，写 series: [] 即可。
+  if (!threeOptionsRef.value.series.length && !props.option?.series) {
     const flight = createFlight();
     flight.seriesName = "flight-1";
     threeOptionsRef.value.series.push(flight);
@@ -387,17 +406,19 @@ async function handleExportTheme(): Promise<void> {
 }
 
 // ==================== Lifecycle ====================
-// 外部换主题：整份 options 重算，map 变了要重新加载底图，其余直接重绘
+// 外部换主题（同一页面切 tab / keep-alive 缓存下换参数都会走到这里）：
+// 整份 options 重算，底图变了重新加载，其余直接重绘
 watch(
   () => props.option,
   (next) => {
     const prevCode = threeOptionsRef.value.map;
-    threeOptionsRef.value = mergeOptions(createDefaultOptions(), next);
-    if (!map) return;
+    const { code, name } = resolveArea(next);
 
-    const nextCode = threeOptionsRef.value.map;
-    if (nextCode !== prevCode) {
-      loadMap(nextCode, threeOptionsRef.value.mapName || props.areaName);
+    threeOptionsRef.value = buildOptions(next);
+
+    if (!map) return;
+    if (code !== prevCode) {
+      loadMap(code, name);
     } else {
       reset();
     }
@@ -415,7 +436,8 @@ onMounted(() => {
     map.setFrozen(true);
   }
 
-  loadMap(areaRef.value.area, areaRef.value.name);
+  const { code, name } = resolveArea(props.option);
+  loadMap(code, name);
 });
 
 onBeforeUnmount(() => {

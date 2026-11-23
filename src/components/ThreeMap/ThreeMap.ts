@@ -156,6 +156,15 @@ export default class ThreeMap {
   lastSceneKey: string;
   introFrame: number | null;
   introDone: boolean;
+  /**
+   * 当前入场淡入进度（0~1）。
+   *
+   * 场景图元（区县标点、边缘流光）是可以在入场跑完之后才被面板重建的：
+   * 新材质的 opacity 初始是 0，如果没人负责赋值，就会永远停在 0 ——
+   * 表现就是「把流光关掉再打开，它再也不出现了」。所以把进度存成字段，
+   * 任何时刻新建的图元都能立刻对齐到当前进度。
+   */
+  introOpacity: number;
 
   /**
    * ThreeMap 核心实例构造：初始化场景、渲染器、交互控制器和鼠标事件。
@@ -232,6 +241,7 @@ export default class ThreeMap {
     this.frozen = false;
     this.introFrame = null;
     this.introDone = false;
+    this.introOpacity = 0;
 
     const onPointerMove = (mouseEvent: MouseEvent): void => {
       this.pointer!.x = (mouseEvent.offsetX / this.innerWidth) * 2 - 1;
@@ -407,14 +417,10 @@ export default class ThreeMap {
       this.setEnvironment(options);
       this.setFoundation(options);
       this.lastSceneKey = `${options.mirror.show}|${options.scene.groundRing}|${options.scene.beams}|${options.glow.show}|${options.grid.show}|${options.foundation.show}`;
-      this.lastSceneKey = `${options.mirror.show}|${options.scene.groundRing}|${options.scene.beams}|${options.glow.show}|${options.grid.show}|${options.foundation.show}`;
 
       this.drawDistrictArea(options.data, full.features, options);
       this.drawDistrictOutline(boundary.features, options);
       this.lastWallKey = `${options.wall.show}|${options.wall.height}|${options.wall.color}`;
-
-      // ---- 场景特效（标点 / 描边跑光）----
-      this.buildSceneLayers(options);
 
       const series = options.series;
       series.forEach((item) => {
@@ -438,6 +444,12 @@ export default class ThreeMap {
         const seriesId = this.getSeriesId(item);
         this.seriesKeyMap.set(seriesId, this.getSeriesKey(item));
       });
+
+      // ---- 场景特效（区县标点 / 边缘流光）----
+      // 放在系列之后建：面板切开关时要重建这两层，重加的对象会落到
+      // seriesGroup.children 末尾；首次构建也按同样顺序建，开关来回切
+      // 才不会因为透明物体的叠放顺序变化而出现细微色差。
+      this.buildSceneLayers(options);
 
       // ---- 入场动画：收集淡入材质，跑相机推进 + 厚度生长 ----
       this.collectFadeMaterials();
@@ -682,6 +694,51 @@ export default class ThreeMap {
   }
 
   /**
+   * 城市轮廓 → 世界坐标的 xz 环列表（供漂浮光柱做「点是否在城市内」判定）。
+   *
+   * 投影坐标本身没有居中（地图是靠 seriesGroup.position 挪到原点的），
+   * 而光柱挂在 environmentGroup 上、就在世界原点附近，所以这里要先补上
+   * 那个偏移，才能和光柱的坐标系对齐。
+   *
+   * 注意 z 的符号：mapBox.minY 存的是 min(-projY) = -max(projY)，
+   * 所以 `minY + height/2` 等于「-投影中心Y」，而不是中心Y —— 它刚好就等于
+   * seriesGroup.position.z。也就是说世界 z = projY + 这个值（是加不是减）。
+   * 写成减会让采样区域整体错开约 3.5% 地图宽。
+   */
+  getBoundaryRingsWorld(): [number, number][][] {
+    const projection = this.projection;
+    if (!projection || !this.boundaryFeatures) return [];
+
+    const box = this.mapBox;
+    const cx = box ? box.minX + box.width / 2 : 0;
+    const cz = box ? box.minY + box.height / 2 : 0;
+
+    const rings: [number, number][][] = [];
+    const pushRing = (ring: any): void => {
+      const out: [number, number][] = [];
+      ring.forEach((p: number[]) => {
+        const point = projection(p as [number, number]);
+        if (!point) return;
+        const [x, y] = point;
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+        out.push([x - cx, y + cz]);
+      });
+      if (out.length >= 3) rings.push(out);
+    };
+
+    const walk = (obj: any): void => {
+      if (!obj) return;
+      if (obj.type === 'FeatureCollection') obj.features.forEach(walk);
+      else if (obj.type === 'Feature') walk(obj.geometry);
+      else if (obj.type === 'Polygon') obj.coordinates.forEach(pushRing);
+      else if (obj.type === 'MultiPolygon') obj.coordinates.forEach((poly: any) => poly.forEach(pushRing));
+    };
+    walk({ type: 'FeatureCollection', features: this.boundaryFeatures });
+
+    return rings;
+  }
+
+  /**
    * 配置场景环境特效（镜面反射 + 地面光圈 + 漂浮光柱）
    */
   setEnvironment(options: ThreeMapOptions): void {
@@ -704,7 +761,12 @@ export default class ThreeMap {
     }
 
     if (options.scene.beams) {
-      const beams = drawBeams(width);
+      // 传城市轮廓 + 顶面高度：光条只撒在轮廓以内、并且只在地图顶面上方那层
+      // 薄空气里飘，不会再有长光带横在空白背景上（容易被当成没贴边的流光）
+      const beams = drawBeams(width, {
+        region: this.getBoundaryRingsWorld(),
+        topY: width * 0.01266 + this.mapDepth,
+      });
       this.environmentGroup.add(beams.object);
       this.sceneLayers.push(beams);
     }
@@ -772,13 +834,20 @@ export default class ThreeMap {
   }
 
   /**
-   * 场景特效层：区县标点 + 沿轮廓的描边跑光
+   * 场景特效层：区县标点 + 边缘流光
    */
   buildSceneLayers(options: ThreeMapOptions): void {
-    // 可重复调用：先把上一次的标点/跑光摘掉（面板切开关时会走这里）
+    // 可重复调用：先把上一次的标点/流光摘掉（面板切开关时会走这里）
     const dropLayer = (layer: SceneLayer | null): null => {
       if (!layer) return null;
       this.seriesGroup?.remove(layer.object);
+      // 顺手把它的材质从淡入列表里剔除：否则每开关一次就积一批已释放的材质
+      const dead = new Set<THREE.Material>();
+      layer.object.traverse((obj: any) => {
+        const materials = Array.isArray(obj.material) ? obj.material : obj.material ? [obj.material] : [];
+        materials.forEach((m: any) => dead.add(m));
+      });
+      this.fadeMaterials = this.fadeMaterials.filter((m) => !dead.has(m));
       layer.dispose();
       return null;
     };
@@ -802,21 +871,58 @@ export default class ThreeMap {
     }
 
     if (options.scene.trail && this.boundaryFeatures) {
-      const trail = drawTrail(this as any, { type: 'FeatureCollection', features: this.boundaryFeatures }, topY, this.mapWorldWidth);
+      const trail = drawTrail(
+        this as any,
+        { type: 'FeatureCollection', features: this.boundaryFeatures },
+        topY,
+        this.mapWorldWidth,
+        { speed: options.scene.trailSpeed, length: options.scene.trailLength, brightness: options.scene.trailBrightness },
+      );
       if (trail) {
         this.trailLayer = trail;
         this.seriesGroup.add(trail.object);
+        // 关键：新建的材质 opacity 是 0，必须立刻对齐到当前入场进度。
+        // 少了这一步，把「边缘流光」关掉再打开就会永远不亮 —— 用户看到的是
+        // 「这个特效没了」，而面板上开关明明是勾着的。
+        this.adoptFadeObject(trail.object);
       }
     }
 
-    this.lastSceneToggleKey = `${options.scene.cones}|${options.scene.trail}`;
+    this.lastSceneToggleKey = this.getSceneToggleKey(options);
   }
 
   /**
-   * 增量更新场景图元开关（标点 / 跑光）。
+   * 场景图元开关快照。除了开关本身，流光的可调参数也算在内 ——
+   * 改速度/尾长/亮度要重建几何与材质才能生效。
+   */
+  getSceneToggleKey(options: ThreeMapOptions): string {
+    const s = options.scene;
+    return `${s.cones}|${s.trail}|${s.trailSpeed}|${s.trailLength}|${s.trailBrightness}`;
+  }
+
+  /**
+   * 把一段新加入场景的图元接入淡入体系：材质立刻对齐当前进度，
+   * 并登记进 fadeMaterials，这样入场还在跑的时候新建的图元也会继续跟着淡入。
+   */
+  adoptFadeObject(object: THREE.Object3D): void {
+    const seen = new Set<THREE.Material>(this.fadeMaterials);
+    object.traverse((obj: any) => {
+      const materials = Array.isArray(obj.material) ? obj.material : obj.material ? [obj.material] : [];
+      materials.forEach((m: any) => {
+        if (!m?.uniforms?.opacity || seen.has(m)) return;
+        m.uniforms.opacity.value = this.introOpacity;
+        m.depthWrite = this.introOpacity > 0.06;
+        seen.add(m);
+        this.fadeMaterials.push(m);
+      });
+    });
+  }
+
+  /**
+   * 增量更新场景图元开关（标点 / 流光）。
    */
   updateSceneLayers(options: ThreeMapOptions): void {
-    const key = `${options.scene.cones}|${options.scene.trail}`;
+    const key = this.getSceneToggleKey(options);
     if (key === this.lastSceneToggleKey) return;
     if (!this.districtData.length) return;
     this.buildSceneLayers(options);
@@ -913,6 +1019,7 @@ export default class ThreeMap {
     if (!options.scene.intro) {
       this.camera?.position.copy(end);
       this.seriesGroup?.scale.set(1, 1, 1);
+      this.introOpacity = 1;
       this.fadeMaterials.forEach((material: any) => {
         material.uniforms.opacity.value = 1;
       });
@@ -926,6 +1033,7 @@ export default class ThreeMap {
 
     const start = toSphericalFrom(end, INTRO.distanceRatio, INTRO.azimuthDelta, INTRO.polarRatio);
     this.introDone = false;
+    this.introOpacity = 0;
     this.setDistrictLabelVisible(false);
     this.setDistrictLineOpacity(0);
     this.camera?.position.copy(start);
@@ -956,6 +1064,7 @@ export default class ThreeMap {
       if (this.seriesGroup) {
         this.seriesGroup.scale.y = Math.max(0.0001, ge);
       }
+      this.introOpacity = ge;
       this.fadeMaterials.forEach((material: any) => {
         material.uniforms.opacity.value = ge;
       });
@@ -967,6 +1076,7 @@ export default class ThreeMap {
         this.introFrame = requestAnimationFrame(step);
       } else {
         if (this.seriesGroup) this.seriesGroup.scale.set(1, 1, 1);
+        this.introOpacity = 1;
         this.fadeMaterials.forEach((material: any) => {
           material.uniforms.opacity.value = 1;
         });
@@ -1057,6 +1167,10 @@ export default class ThreeMap {
     this.camera = new THREE.PerspectiveCamera(70, this.innerWidth / this.innerHeight, 0.1, 1000);
     this.camera.position.set(1, 5, 5);
     this.camera.lookAt(0, 0, 0);
+    // 第 1 层专供「不该进镜面倒影的细亮线」（边缘流光、轮廓描线）。
+    // 主相机要看得见它们；镜面用的虚拟相机保持默认（只看第 0 层），
+    // 于是倒影里天然不会有这些线 —— 见 render() 里的说明。
+    this.camera.layers.enable(1);
   }
 
   /**
@@ -1145,8 +1259,12 @@ export default class ThreeMap {
       const flightGroup = this.seriesGroup.children.filter((it: any) => it._category === "flight");
       updateMiniFly(flightGroup as any, delta);
 
-      // 场景层（地面光圈自转 / 光柱漂移 / 轮廓跑光）
+      // 场景层（地面光圈自转 / 光柱漂移）
       this.sceneLayers.forEach((layer) => layer.update(delta));
+
+      // 边缘流光：它由面板开关随时重建，没走 sceneLayers，
+      // 必须在这里单独推进 time —— 否则那道光只是静静躺在轮廓上，不会「流」。
+      this.trailLayer?.update(delta);
 
       // 散点涟漪
       this.foundationIns.forEach((mesh: any) => {
@@ -1175,7 +1293,25 @@ export default class ThreeMap {
 
     // 镜面反射必须在主渲染之前把场景渲到离屏纹理
     if (this.mirrorHandle && this.renderer) {
+      // 倒影里排除边缘流光。
+      //
+      // 地图是悬浮在镜面上方的（seriesGroup.position.y ≈ 地图宽 1.3%），
+      // 任何有高度的物体在倒影里都会相对本体向外「扩散」一点 —— 地图本体是一块面，
+      // 多点少点看不出来；但流光只有几个像素宽又很亮，倒影里那条线会明显跑到
+      // 轮廓之外的空白处，看着就像「流光没沿着地图边缘」（本体其实是贴合的）。
+      // 所以只让本体有这道光，倒影里不要。
+      const trailObject: THREE.Object3D | undefined = this.trailLayer?.object;
+      // 轮廓描线（outLineStyle.show）是同一类东西：细、亮、有高度 → 倒影同样会飘出去
+      const hairLines: THREE.Object3D[] = [];
+      if (trailObject) hairLines.push(trailObject);
+      this.seriesGroup?.children.forEach((child: any) => {
+        if (child?._category === "outline") hairLines.push(child);
+      });
+
+      const prevVisible = hairLines.map((obj) => obj.visible);
+      hairLines.forEach((obj) => (obj.visible = false));
       this.mirrorHandle.render(this.renderer, scene, camera);
+      hairLines.forEach((obj, i) => (obj.visible = prevVisible[i]!));
     }
 
     if (bloomComposer) {

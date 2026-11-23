@@ -237,7 +237,10 @@ const createDefaultOptions = (): ThreeMapOptions => {
       groundRing: true, // 地面光圈
       beams: true, // 漂浮光柱
       cones: true, // 区县标点（光锥 + 光环）
-      trail: true, // 沿轮廓的描边跑光
+      trail: true, // 边缘流光（沿外轮廓循环跑的一道光）
+      trailSpeed: 10, // 跑一圈的秒数
+      trailLength: 0.3, // 尾长占整圈的比例
+      trailBrightness: 1, // 亮度倍率
       intro: true, // 入场动画
     },
     // ========== 系列和数据配置 ==========
