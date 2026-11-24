@@ -193,7 +193,7 @@ onBeforeUnmount(() => {
   &__three {
     position: absolute;
     inset: 0;
-    top: -208px;
+    top: -145px;
   }
 }
 

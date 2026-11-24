@@ -255,6 +255,8 @@ export interface ThreeMapOptions {
   mirror: {
     show: boolean;
     color: [string, string];
+    /** 倒影浓度 0~1：1 = 最实，越小越淡，0 = 倒影完全消失（只影响地面倒影，不动地图本体） */
+    opacity: number;
   };
   wall: {
     show: boolean;

@@ -21,7 +21,10 @@ uniform vec3 sideTintColor;
 uniform float sideTintStrength;
 uniform float stripeScale;
 uniform float stripeStrength;
+// 入场淡入进度（由 ThreeMap 的入场动画驱动）
 uniform float opacity;
+// 侧面的不透明度：1 = 整面实心（不透出背后的墙），越小越透，且越靠下先透
+uniform float sideOpacity;
 
 float hash21(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
@@ -63,10 +66,11 @@ void main() {
   vec3 sideTinted = min(sideTintColor * (sideLum / tintLum), vec3(3.0));
   color = mix(color, sideTinted, sideTintStrength);
 
-  // 通透 + 干净：下端渐隐到完全透明。
-  // 侧面底部原本是一条深蓝半透明的窄带，跟上方亮边并排看就是一条脏边，
-  // 加上挤出体的多边形台阶，边缘会显得毛糙。渐隐之后侧面像悬浮的玻璃，看不到硬边。
-  float alpha = opacity * mix(0.0, 0.95, pow(h, 1.15));
+  // 侧面透明度分两件事：
+  // 1) sideOpacity = 1：整面 alpha 恒为 1，非镜面部分完全不透视，背后那面墙被正常遮挡；
+  // 2) sideOpacity < 1：按竖向渐变淡出——底部比顶部先透，保留悬浮玻璃的观感。
+  // 入场淡入（opacity）在它之上再乘一层，两者互不影响。
+  float alpha = opacity * sideOpacity * mix(1.0, pow(h, 1.15), 1.0 - sideOpacity);
 
   gl_FragColor = vec4(color, alpha);
 }
@@ -88,6 +92,8 @@ export interface SideOptions {
   tintColor: string;
   /** 染色强度 0~1 */
   tintStrength: number;
+  /** 侧面不透明度：1 = 完全实心，越小越透（底部比顶部先透） */
+  opacity: number;
 }
 
 const DEFAULT_SIDE_OPTIONS: SideOptions = {
@@ -98,6 +104,7 @@ const DEFAULT_SIDE_OPTIONS: SideOptions = {
   stripeStrength: 0.82,
   tintColor: '#ffffff',
   tintStrength: 0,
+  opacity: 1,
 };
 
 export function createShiftUniforms(depth: number, options: Partial<SideOptions> = {}): Uniforms {
@@ -113,6 +120,7 @@ export function createShiftUniforms(depth: number, options: Partial<SideOptions>
     stripeScale: { value: 3.2 },
     stripeStrength: { value: 0.82 },
     opacity: { value: 0 },
+    sideOpacity: { value: 1 },
   };
   applyShiftOptions(uniforms, options);
   return uniforms;
@@ -128,4 +136,6 @@ export function applyShiftOptions(uniforms: Uniforms | undefined, options: Parti
   uniforms.stripeStrength!.value = cfg.stripeStrength;
   (uniforms.sideTintColor!.value as any).copy(displayColor(cfg.tintColor));
   uniforms.sideTintStrength!.value = Math.min(1, Math.max(0, cfg.tintStrength));
+  // 侧面不透明度：1 = 实心，0 = 完全消失，中间按竖向渐变透
+  uniforms.sideOpacity!.value = Math.min(1, Math.max(0, cfg.opacity));
 }

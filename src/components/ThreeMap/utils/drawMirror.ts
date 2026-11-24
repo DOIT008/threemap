@@ -39,6 +39,8 @@ export interface MirrorHandle {
   mesh: THREE.Mesh;
   /** 每帧在主渲染之前调用：把场景反射到离屏纹理 */
   render: (gl: WebGLRenderer, scene: Scene, camera: PerspectiveCamera) => void;
+  /** 倒影浓度（0~1）：纯 uniform 改动，不重建离屏纹理 */
+  setOpacity: (value: number) => void;
   dispose: () => void;
 }
 
@@ -51,8 +53,18 @@ export interface MirrorHandle {
  *
  * @param transparent 透明背景模式：平面不再铺深色底板，透明度按倒影亮度取，
  *                    没倒影的地方完全透明，露出页面/大屏自己的背景
+ * @param baseY 地图底面的高度。透明模式会把镜面抬到这里，让倒影紧接本体，
+ *              否则中间隔着一道地图宽的间隙，倒影看着就像另贴的一块板
+ * @param opacity 倒影浓度（0~1）：只影响地面倒影的深浅，不影响地图本体
  */
-export function drawMirror(mapWidth: number, scene: Scene, camera: PerspectiveCamera, transparent = false): MirrorHandle {
+export function drawMirror(
+  mapWidth: number,
+  scene: Scene,
+  camera: PerspectiveCamera,
+  transparent = false,
+  baseY = 0,
+  opacity = 1,
+): MirrorHandle {
   const size = mapWidth * 6.66; // demo 里是 100 / 15（地图世界宽）
   const geometry = new THREE.PlaneGeometry(size, size);
   const mesh = new THREE.Mesh(geometry) as any;
@@ -63,7 +75,10 @@ export function drawMirror(mapWidth: number, scene: Scene, camera: PerspectiveCa
   // 打上标记让 bloom 路径跳过它。
   mesh._skipBloomDarken = true;
   mesh.rotation.x = -Math.PI / 2;
-  mesh.position.y = -mapWidth * 0.00133; // demo: -0.02 / 15
+  // 不透明模式保持 demo 的悬浮感：镜面留在地面，地图浮在它上方一点点；
+  // 透明模式把镜面抬到地图底面（再留 0.2% 地图宽避开与底面共面的裁切抖动），
+  // 倒影从本体边缘直接接上，才不会被衬成一块浮在地图下面的板
+  mesh.position.y = transparent ? baseY - mapWidth * 0.002 : -mapWidth * 0.00133; // demo: -0.02 / 15
 
   const hasBlur = BLUR[0] + BLUR[1] > 0;
   const targetParams = { minFilter: LinearFilter, magFilter: LinearFilter, type: HalfFloatType };
@@ -87,7 +102,9 @@ export function drawMirror(mapWidth: number, scene: Scene, camera: PerspectiveCa
   const material = new ReflectorMaterial({ color: '#010a1c', metalness: 0.6, roughness: 1 });
   material.defines = {};
   if (hasBlur) material.defines.USE_BLUR = '';
-  if (DEPTH_SCALE > 0) material.defines.USE_DEPTH = '';
+  // 深度衰减（远处更糊、更淡）是 demo 的观感用法；它会把整个倒影额外乘上 0.5~1，
+  // 玻璃地面模式下这就变成了「倒影比本体淡一截」，两面看着不对称 —— 所以透明模式关掉它
+  if (DEPTH_SCALE > 0 && !transparent) material.defines.USE_DEPTH = '';
   if (transparent) {
     // 没有倒影的像素 alpha 为 0（见 ReflectorMaterial），底板色/光照不参与显示，
     // 所以关掉深度写入，避免这块透明大平面挡住其他透明图元
@@ -105,7 +122,10 @@ export function drawMirror(mapWidth: number, scene: Scene, camera: PerspectiveCa
   u.tDepth.value = fbo1.depthTexture;
   u.tDiffuseBlur.value = fbo2.texture;
   u.hasBlur.value = hasBlur;
-  u.mixStrength.value = MIX_STRENGTH;
+  u.mixStrength.value = transparent ? 1 : MIX_STRENGTH;
+  // 透明模式下只留一点点模糊（压噪而不糊掉，否则倒影比本体软一截，肉眼就不对称了）
+  u.mixBlur.value = transparent ? 0.2 : MIX_BLUR;
+  u.reflectionOpacity.value = Math.min(1, Math.max(0, opacity));
   u.minDepthThreshold.value = MIN_DEPTH_THRESHOLD;
   u.maxDepthThreshold.value = MAX_DEPTH_THRESHOLD;
   u.depthScale.value = DEPTH_SCALE;
@@ -202,6 +222,10 @@ export function drawMirror(mapWidth: number, scene: Scene, camera: PerspectiveCa
     gl.setRenderTarget(null);
   };
 
+  const setOpacity = (value: number): void => {
+    material.reflection.reflectionOpacity.value = Math.min(1, Math.max(0, value));
+  };
+
   const dispose = (): void => {
     material.dispose();
     geometry.dispose();
@@ -210,7 +234,7 @@ export function drawMirror(mapWidth: number, scene: Scene, camera: PerspectiveCa
     blurPass.dispose();
   };
 
-  return { mesh, render: renderReflection, dispose };
+  return { mesh, render: renderReflection, setOpacity, dispose };
 }
 
 /** 类型占位，避免未使用导入被裁掉时的类型报错 */

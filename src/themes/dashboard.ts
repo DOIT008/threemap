@@ -65,6 +65,7 @@ const mapTheme: ThreeMapTheme = {
   },
   mirror: {
     show: true,
+    opacity: 0.2,
     color: [
       "#020B1F",
       "#00D2FF"
@@ -207,7 +208,8 @@ const mapTheme: ThreeMapTheme = {
     stripeScale: 4.8,
     stripeStrength: 0.82,
     tintColor: "#70e7ff",
-    tintStrength: 0
+    tintStrength: 0,
+    opacity: 1
   },
   scene: {
     groundRing: true,

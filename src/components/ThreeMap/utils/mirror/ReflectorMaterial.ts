@@ -22,6 +22,8 @@ export interface ReflectionUniforms {
   depthToBlurRatioBias: { value: number };
   distortion: { value: number };
   mixContrast: { value: number };
+  /** 倒影浓度：1 = 最实，0 = 完全隐藏（不透明模式的底板不受影响） */
+  reflectionOpacity: { value: number };
 }
 
 export class ReflectorMaterial extends MeshStandardMaterial {
@@ -45,6 +47,7 @@ export class ReflectorMaterial extends MeshStandardMaterial {
       depthToBlurRatioBias: { value: 0.25 },
       distortion: { value: 1 },
       mixContrast: { value: 1 },
+      reflectionOpacity: { value: 1 },
     };
   }
 
@@ -68,6 +71,7 @@ export class ReflectorMaterial extends MeshStandardMaterial {
     shader.uniforms.depthToBlurRatioBias = u.depthToBlurRatioBias;
     shader.uniforms.distortion = u.distortion;
     shader.uniforms.mixContrast = u.mixContrast;
+    shader.uniforms.reflectionOpacity = u.reflectionOpacity;
 
     shader.vertexShader = `
       uniform mat4 textureMatrix;
@@ -96,6 +100,7 @@ export class ReflectorMaterial extends MeshStandardMaterial {
       uniform float mixContrast;
       uniform float depthScale;
       uniform float depthToBlurRatioBias;
+      uniform float reflectionOpacity;
       varying vec4 my_vUv;
     ${shader.fragmentShader}`;
 
@@ -162,14 +167,44 @@ export class ReflectorMaterial extends MeshStandardMaterial {
       newMerge.g = (merge.g - 0.5) * mixContrast + 0.5;
       newMerge.b = (merge.b - 0.5) * mixContrast + 0.5;
 
-      diffuseColor.rgb = diffuseColor.rgb * ((1.0 - min(1.0, mirror)) + newMerge.rgb * mixStrength);
+      diffuseColor.rgb =
+        diffuseColor.rgb * (1.0 - min(1.0, mirror)) +
+        diffuseColor.rgb * newMerge.rgb * mixStrength * reflectionOpacity;
 
       #ifdef USE_ALPHA_BY_REFLECTION
-        // 透明背景模式：alpha 跟着倒影亮度走 —— 没倒影的空白地面完全透明，
-        // 既不会把大屏背景盖成一块深色矩形，倒影本身又能正常叠上去
-        diffuseColor.a *= smoothstep(0.02, 0.26, max(newMerge.r, max(newMerge.g, newMerge.b)));
+        // 反射纹理是渲进 RT 的，而 RT 的 outputColorSpace 是 LinearSRGB（只有画布才走 sRGB）；
+        // 地图用的又是原生 ShaderMaterial，写进去的就是设计色值本身（相当于 sRGB 编码）。
+        // 所以这里先解码回线性，再由 colorspace_fragment 重新编码：
+        // 倒影的颜色才能和真实侧墙逐像素对上，不会整体发白。
+        vec3 reflectColor = sRGBTransferEOTF(vec4(merge.rgb, 1.0)).rgb;
+
+        // 虚拟相机视锥之外没有真实像素，texture2DProj 会沿边缘 clamp，
+        // 不掐掉就会沿视锥边界拖出一整片直边灰雾（看着像另外贴了一块板）
+        vec2 projUv = new_vUv.xy / max(new_vUv.w, 0.0001);
+        float inView = smoothstep(
+          0.0,
+          0.05,
+          min(min(projUv.x, 1.0 - projUv.x), min(projUv.y, 1.0 - projUv.y))
+        );
+        // 平面边缘再径向淡出：倒影往外自然溶解，不和背景留一条硬边
+        float edgeFade = 1.0 - smoothstep(0.30, 0.50, length(vUv - 0.5));
+        // 倒影的 alpha 直接取反射纹理的 alpha：那里存的就是「这块像素上几何体自己的透明度」。
+        // 侧墙调多透，倒影就跟着多透，两边才像同一面镜子里的同一堵墙。
+        // 之前按亮度猜，深色倒影像素会被判成半透明，所以 opacity = 1 也“能穿透”。
+        float coverage = smoothstep(0.02, 0.35, merge.a);
+        diffuseColor.a = inView * edgeFade * reflectionOpacity * coverage;
       #endif
       `,
+    );
+
+    // 透明模式下的倒影不再吃光照：底板色（#010a1c）乘上场景两盏强光只会得到一块
+    // 发灰的「地板」，既不通透，也和贴着光的本体对不上。直接输出反射颜色。
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <opaque_fragment>',
+      `#ifdef USE_ALPHA_BY_REFLECTION
+        outgoingLight = reflectColor * mixStrength;
+      #endif
+      #include <opaque_fragment>`,
     );
   }
 }

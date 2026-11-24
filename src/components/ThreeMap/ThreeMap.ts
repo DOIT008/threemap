@@ -532,6 +532,10 @@ export default class ThreeMap {
   updateEnvironment(options: ThreeMapOptions): void {
     if (!this.environmentGroup) return;
 
+    // 倒影浓度只是 uniform，不重建离屏纹理，所以放在 key 判断之前：
+    // 拖面板时不用重建整个环境层就能实时变淡
+    this.mirrorHandle?.setOpacity(options.mirror.opacity ?? 1);
+
     const key = `${options.background.show}|${options.mirror.show}|${options.scene.groundRing}|${options.scene.groundRingScale}|${options.scene.beams}|${options.glow.show}|${options.grid.show}|${options.foundation.show}`;
     if (this.lastSceneKey === key) return;
     this.lastSceneKey = key;
@@ -775,8 +779,17 @@ export default class ThreeMap {
     }
 
     if (options.mirror.show) {
-      // 透明背景时镜面不留深色底板，只把倒影按亮度叠上去
-      this.mirrorHandle = drawMirror(width, this.scene!, this.camera!, !options.background.show);
+      // 透明背景时镜面不留深色底板，只把倒影按亮度叠上去；
+      // 地图底面的高度传进去，镜面才能贴着本体放、倒影不会和地图分家；
+      // 最后一个参数是倒影浓度，只影响倒影深浅，不动地图本体
+      this.mirrorHandle = drawMirror(
+        width,
+        this.scene!,
+        this.camera!,
+        !options.background.show,
+        this.seriesGroup.position.y,
+        options.mirror.opacity ?? 1,
+      );
       this.environmentGroup.add(this.mirrorHandle.mesh);
     }
   }

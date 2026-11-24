@@ -105,6 +105,7 @@ const createDefaultOptions = (): ThreeMapOptions => {
     mirror: {
       show: true, // 是否显示镜面反射效果（在地图下方渲染翻转的副本）
       color: ["#020B1F", "#00D2FF"], // 镜面渐变色：[底部颜色, 顶部颜色]
+      opacity: 1, // 倒影浓度：1 = 最实，越小越淡，0 = 倒影消失（不影响地图本体）
     },
     // ========== 边界墙体配置 ==========
     wall: {
@@ -237,6 +238,7 @@ const createDefaultOptions = (): ThreeMapOptions => {
       stripeStrength: 0.82, // 条纹强度
       tintColor: "#ffffff", // 染色色相，白色 = 保持冰蓝
       tintStrength: 0, // 0 = 冰蓝，1 = 完全换成 tintColor
+      opacity: 1, // 侧面不透明度：1 = 实心（不透出背后），越小越透，底部比顶部先透
     },
     // ========== 场景特效开关 ==========
     scene: {

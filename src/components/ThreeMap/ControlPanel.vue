@@ -391,6 +391,19 @@ function updateColorByHex(target: "topColor" | "sideColor" | "uColor" | "outLine
             <span class="panel-label">开启镜面:</span>
             <input type="checkbox" v-model="props.options.mirror.show" @change="emitApply" />
           </div>
+          <div v-if="props.options.mirror.show" class="panel-item">
+            <span class="panel-label">倒影透明度:</span>
+            <input
+              class="number-input"
+              type="number"
+              min="0"
+              max="1"
+              step="0.05"
+              title="1 = 倒影最实；越小倒影越淡；0 = 倒影完全消失（地图本体不受影响）"
+              v-model.number="props.options.mirror.opacity"
+              @change="emitApply"
+            />
+          </div>
           <div class="panel-item toggle">
             <span class="panel-label">地区名称:</span>
             <input type="checkbox" v-model="props.options.label.show" @change="emitApply" />
@@ -527,6 +540,19 @@ function updateColorByHex(target: "topColor" | "sideColor" | "uColor" | "outLine
           <div class="panel-item">
             <span class="panel-label">染色强度:</span>
             <input class="number-input" type="number" min="0" max="1" step="0.05" v-model.number="props.options.side.tintStrength" @change="emitApply" />
+          </div>
+          <div class="panel-item">
+            <span class="panel-label">侧面透明度:</span>
+            <input
+              class="number-input"
+              type="number"
+              min="0"
+              max="1"
+              step="0.05"
+              title="1 = 整面实心，不会透出背后的墙；越小越透，底部比顶部先透；0 = 侧面完全消失"
+              v-model.number="props.options.side.opacity"
+              @change="emitApply"
+            />
           </div>
         </div>
       </div>
