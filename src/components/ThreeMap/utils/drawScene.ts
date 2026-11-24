@@ -14,6 +14,8 @@ export interface SceneLayer {
   object: THREE.Object3D;
   update: (delta: number) => void;
   dispose: () => void;
+  /** 可选：运行时改尾长（入场时压短，只剩一段光在描轮廓） */
+  setTrailLength?: (value: number) => void;
 }
 
 /**
@@ -306,7 +308,10 @@ export function drawTrail(
     // 中心仍然过曝成白，两侧由 section 衰减回轮廓的青色，才像「一道光扫过」。
     color: { value: new THREE.Color(2, 10, 10).multiplyScalar(0.16 * brightness) },
     time: { value: 0 },
-    opacity: { value: 0 },
+    // 这道光是唯一不参与入场淡入的图层：demo 的进场就是让它在空场景上先沿着
+    // 外轮廓跑，跑了 2.5s 地图才长出来（GeoTrail 的 mesh 挂在 scene 上，不在淡入名单里）。
+    // 所以它的 opacity 一直是满的，见下面 material.userData.skipIntroFade。
+    opacity: { value: 1 },
     speed: { value: 1 / speedSeconds }, // 越小越慢（speed × 秒数 = 1 圈）
     trailLength: { value: tail },
     // 宽度按地图宽占比（ribbon 左右各一份，屏幕上总宽 ≈ 2×该值×视距补偿）。
@@ -332,10 +337,17 @@ export function drawTrail(
   // 空白处，看着就像「流光没沿着地图边缘」（本体其实是严格贴合的）。
   mesh.layers.set(1);
 
+  // 入场淡入时跳过这个材质：进场那 2.5 秒里地图还是全透明的，画面里只应该有它
+  // 沿着空地图的边缘跑（见 ThreeMap.collectFadeMaterials / adoptFadeObject）
+  material.userData.skipIntroFade = true;
+
   return {
     object: mesh,
     update: (delta: number) => {
       uniforms.time.value += delta;
+    },
+    setTrailLength: (value: number) => {
+      uniforms.trailLength.value = Math.min(1, Math.max(0.03, value));
     },
     dispose: () => {
       geometry.dispose();

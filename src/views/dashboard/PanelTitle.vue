@@ -41,6 +41,8 @@ defineEmits<{ enter: [] }>();
     top: -2px;
     width: 32px;
     height: 29px;
+    // 》》 持续向右往返：像在“催”视线进入面板，静止时容易和切图混成一片
+    animation: db-chevron-flow 1.8s ease-in-out infinite;
   }
 
   // 切图宽度固定、高度按原始比例（442×32，趋势图 442×30）
@@ -109,6 +111,19 @@ defineEmits<{ enter: [] }>();
         transform: translateX(3px);
       }
     }
+  }
+}
+
+// 》》箭头左右往返：只动 3px，幅度大了会显得慌
+@keyframes db-chevron-flow {
+  0%,
+  100% {
+    transform: translateX(0);
+    opacity: 0.82;
+  }
+  50% {
+    transform: translateX(3px);
+    opacity: 1;
   }
 }
 </style>

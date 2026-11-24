@@ -93,6 +93,9 @@ const createWallByPath = ({ verticesByTwo = [] as number[][][], color = 0x00ffff
     opacity: tc.getAlpha(),
     alphaMap: wallTexture, // 使用纹理的 alpha 通道控制透明度（实现渐变效果）
   });
+  // 墙体和描线一样：入场时得跟着压暗，否则地图还没出来，墙已经立在画面上了
+  meshMat.userData.baseOpacity = tc.getAlpha();
+  meshMat.userData.introLineFade = true;
 
   return new THREE.Mesh(geometry, meshMat);
 };
@@ -159,6 +162,10 @@ export const drawOutline = function (
           transparent: true,
           opacity,
         });
+        // 外轮廓描线用的是 material.opacity，进不了 uniforms 那套入场淡入；
+        // 打标记让 ThreeMap 把它也收进入场压暗名单（见 collectIntroLineMaterials）
+        lineMaterial.userData.baseOpacity = opacity;
+        lineMaterial.userData.introLineFade = true;
 
         const points: THREE.Vector3[] = []; // 线条顶点
         const wp: number[][][] = []; // 墙体路径：[底部点, 顶部点]

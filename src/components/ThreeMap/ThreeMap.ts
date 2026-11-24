@@ -144,6 +144,11 @@ export default class ThreeMap {
   districtCells: THREE.Group[];
   /** 参与入场淡入的材质（所有带 uniforms.opacity 的材质） */
   fadeMaterials: THREE.Material[];
+  /**
+   * 入场时同样要跟着压暗、但用的是 material.opacity 的线状材质
+   * （外轮廓描线、电子围栏墙体）—— 见 collectIntroLineMaterials。
+   */
+  introLineMaterials: any[];
   /** 场景特效层（光圈/光柱/标点/描边跑光） */
   sceneLayers: SceneLayer[];
   mirrorHandle: ReturnType<typeof drawMirror> | null;
@@ -235,6 +240,7 @@ export default class ThreeMap {
     this.mirrorHandle = null;
     this.conesLayer = null;
     this.trailLayer = null;
+    this.introLineMaterials = [];
     this.lastSceneToggleKey = "";
     this.lastCameraKey = "";
     this.lastIntroKey = "";
@@ -520,6 +526,7 @@ export default class ThreeMap {
       drawWall().then((group) => {
         (group as any)._category = "wall";
         this.seriesGroup && this.seriesGroup.add(group);
+        this.collectIntroLineMaterials(group);
       });
     }
 
@@ -903,10 +910,9 @@ export default class ThreeMap {
       if (trail) {
         this.trailLayer = trail;
         this.seriesGroup.add(trail.object);
-        // 关键：新建的材质 opacity 是 0，必须立刻对齐到当前入场进度。
-        // 少了这一步，把「边缘流光」关掉再打开就会永远不亮 —— 用户看到的是
-        // 「这个特效没了」，而面板上开关明明是勾着的。
-        this.adoptFadeObject(trail.object);
+        // 这道光不参与入场淡入（见 drawTrail 里的 skipIntroFade）：进场那 2.5 秒
+        // 地图还是全透明的，画面里只应该有它沿着空地图边缘跑。
+        // 它自己就是常亮、每次重建都从 opacity 1 开始，所以不用 adoptFadeObject。
       }
     }
 
@@ -931,7 +937,8 @@ export default class ThreeMap {
     object.traverse((obj: any) => {
       const materials = Array.isArray(obj.material) ? obj.material : obj.material ? [obj.material] : [];
       materials.forEach((m: any) => {
-        if (!m?.uniforms?.opacity || seen.has(m)) return;
+        // skipIntroFade：边缘流光这类「进场时就要亮着」的图层，不接进淡入体系
+        if (!m?.uniforms?.opacity || seen.has(m) || m.userData?.skipIntroFade) return;
         m.uniforms.opacity.value = this.introOpacity;
         m.depthWrite = this.introOpacity > 0.06;
         seen.add(m);
@@ -959,11 +966,13 @@ export default class ThreeMap {
    */
   collectFadeMaterials(): void {
     this.fadeMaterials = [];
+    this.introLineMaterials = [];
     if (!this.seriesGroup) return;
 
     const seen = new Set<THREE.Material>();
     const add = (material: any): void => {
-      if (material?.uniforms?.opacity && !seen.has(material)) {
+      // skipIntroFade：边缘流光不跟着地图一起淡入，进场时它要先在空场景上跑
+      if (material?.uniforms?.opacity && !seen.has(material) && !material.userData?.skipIntroFade) {
         seen.add(material);
         this.fadeMaterials.push(material);
       }
@@ -980,6 +989,41 @@ export default class ThreeMap {
     });
 
     this.applyDepthWrite(false);
+    // 外轮廓描线走的是 material.opacity，进不了上面那套 uniform 淡入，单独收一遍
+    this.collectIntroLineMaterials(this.seriesGroup);
+  }
+
+  /**
+   * 收集「用 material.opacity、而不是 uniforms.opacity」的线状材质（外轮廓描线、围栏墙体）。
+   *
+   * 不单独管的话，进场那 2.5 秒地图还全透明，整圈轮廓线却已经画在画面上了 ——
+   * 也就是反馈里的「刚进来就有整个图的轮廓，而不是一道光在描轮廓」。
+   * 收进来后由 setIntroLineOpacity 跟着入场进度压暗。
+   *
+   * 墙体是异步建的（drawWall 的 Promise），可能在入场跑到一半才加进来，
+   * 所以登记时立刻对齐一次当前进度。
+   */
+  collectIntroLineMaterials(root: THREE.Object3D | null): void {
+    if (!root) return;
+    const seen = new Set<THREE.Material>(this.introLineMaterials);
+    root.traverse((obj: any) => {
+      const materials = Array.isArray(obj.material) ? obj.material : obj.material ? [obj.material] : [];
+      materials.forEach((m: any) => {
+        if (!m?.userData?.introLineFade || seen.has(m)) return;
+        seen.add(m);
+        this.introLineMaterials.push(m);
+        m.opacity = (m.userData.baseOpacity ?? 1) * this.introOpacity;
+      });
+    });
+  }
+
+  /** 外轮廓描线 / 围栏墙体的入场透明度（0~1 倍率） */
+  setIntroLineOpacity(scale: number): void {
+    this.introLineMaterials.forEach((m: any) => {
+      m.opacity = (m.userData?.baseOpacity ?? 1) * scale;
+      // 还没真正看清之前先别写深度，否则这些透明线会在地面光圈上划出细缝
+      m.depthWrite = scale > 0.06;
+    });
   }
 
   /**
@@ -1049,6 +1093,9 @@ export default class ThreeMap {
       if (this.conesLayer) this.conesLayer.object.visible = true;
       this.setDistrictLabelVisible(true);
       this.setDistrictLineOpacity(1);
+      this.setIntroLineOpacity(1);
+      // 不开入场动画时流光就是常态尾长
+      this.trailLayer?.setTrailLength?.(options.scene.trailLength);
       this.introDone = true;
       return;
     }
@@ -1058,20 +1105,49 @@ export default class ThreeMap {
     this.introOpacity = 0;
     this.setDistrictLabelVisible(false);
     this.setDistrictLineOpacity(0);
+    // 外轮廓描线、围栏墙体也不能一上来就画在画面上，跟着入场压到全透明
+    this.setIntroLineOpacity(0);
     this.camera?.position.copy(start);
     // 只压扁 Y（地图厚度方向），XZ 不动，避免入场时贴图被拉伸
     this.seriesGroup?.scale.set(1, 0.0001, 1);
     if (this.conesLayer) this.conesLayer.object.visible = false;
 
+    // 进场那道光是「一笔一笔把轮廓画出来」，不是整圈轮廓一起亮着：
+    // 尾长先压到整圈的 1/10（demo 的 GeoTrail 采样就是 100 × 3.3 ≈ 10%），
+    // 画面上只有一段短光在跑，跑过的部分不留下痕迹。
+    // 等地图开始长出来（2.5s 后）再把它拉回主题里的尾长，两段不跳。
+    const trailTail = options.scene.trailLength;
+    const introTrailTail = Math.min(trailTail, 0.1);
+    this.trailLayer?.setTrailLength?.(introTrailTail);
+
     const cameraTween = { duration: 2500 };
     const growTween = { delay: 2500, duration: 1000 };
-    const t0 = performance.now();
 
     const easeOutCirc = (x: number): number => Math.sqrt(1 - Math.pow(x - 1, 2));
     const easeOutQuad = (x: number): number => 1 - (1 - x) * (1 - x);
 
+    // 计时不读挂钟，改按「真正画出来的帧」累计：
+    //
+    // 首帧要现编着色器（辉光 / 镜面 / 挤出体）并上传贴图，主线程常被卡几百毫秒到一秒；
+    // 如果按 performance.now() 的差值算，这一卡就把 2.5s 的相机推进整段吃掉 —— 用户看到的是
+    // 空场景一动不动，然后地图「啪」一下出现，也就是反馈里的「进场没有过渡」。
+    // 所以每帧最多推进 120ms：掉帧时宁可整段放慢，也不跳过任何一段动画
+    // （正常 20fps 以上时和真实时间完全一致）。
+    let last = performance.now();
+    let elapsed = 0;
+    // 先让出一帧：把「远处机位 + 全透明地图」这一帧真的画出来，动画起点才看得见
+    let warmup = 1;
+
     const step = (): void => {
-      const elapsed = performance.now() - t0;
+      const now = performance.now();
+      if (warmup > 0) {
+        warmup -= 1;
+        last = now;
+        this.introFrame = requestAnimationFrame(step);
+        return;
+      }
+      elapsed += Math.min(Math.max(now - last, 0), 120);
+      last = now;
 
       // 相机推进
       const ct = Math.min(1, elapsed / cameraTween.duration);
@@ -1091,6 +1167,9 @@ export default class ThreeMap {
         material.uniforms.opacity.value = ge;
       });
       this.setDistrictLineOpacity(ge);
+      this.setIntroLineOpacity(ge);
+      // 地图长出来的同时把尾长从「一段光」拉回主题值，轮廓由「正在被画」过渡到「整圈亮边」
+      this.trailLayer?.setTrailLength?.(introTrailTail + (trailTail - introTrailTail) * ge);
       // 淡入过半才恢复写深度，避免切太早闪一下暗块
       this.applyDepthWrite(ge > 0.06);
 
@@ -1106,6 +1185,8 @@ export default class ThreeMap {
         if (this.conesLayer) this.conesLayer.object.visible = true;
         this.setDistrictLabelVisible(true);
         this.setDistrictLineOpacity(1);
+        this.setIntroLineOpacity(1);
+        this.trailLayer?.setTrailLength?.(trailTail);
         this.introDone = true;
         this.introFrame = null;
       }
@@ -1418,6 +1499,8 @@ export default class ThreeMap {
     this.mapTextures.push(wallTexture);
     drawWall().then((group) => {
       this.seriesGroup && this.seriesGroup.add(group);
+      // 围栏墙体是异步建的，入场跑到一半才加进来：立刻对齐当前进度
+      this.collectIntroLineMaterials(group);
     });
   }
 
