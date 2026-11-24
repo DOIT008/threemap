@@ -41,6 +41,11 @@ const createDefaultOptions = (): ThreeMapOptions => {
       scale: 100, // 自动缩放关闭时的投影缩放比例
       depth: 53, // 区域厚度（千分比：53 = 地图宽度的 5.3%，与 demo 的 1.6/30.018 等价）
     },
+    // ========== 画布背景配置 ==========
+    background: {
+      show: false, // 是否绘制背景色：关掉 = 画布透明，露出页面/大屏背景
+      color: "#041533", // 背景色（show 打开时生效，雾也用它）
+    },
     // ========== 自动旋转配置 ==========
     autoRotate: {
       autoRotate: false, // 是否启用相机自动旋转

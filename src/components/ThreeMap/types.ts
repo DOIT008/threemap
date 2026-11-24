@@ -215,6 +215,11 @@ export interface RangeOptions {
 
 export interface ThreeMapOptions {
   config: MapConfig;
+  /** 画布背景：show=false 时画布透明，页面/大屏背景直接透出 */
+  background: {
+    show: boolean;
+    color: string;
+  };
   autoRotate: {
     autoRotate: boolean;
     autoRotateSpeed: number;

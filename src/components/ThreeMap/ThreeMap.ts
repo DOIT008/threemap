@@ -318,6 +318,7 @@ export default class ThreeMap {
       this.options = options;
       updateDistrictMaterials.call(this as any, options.data, options);
       this.updateOutlineLayers(options);
+      this.setBackground(options);
       this.updateEnvironment(options);
       this.updateSceneLayers(options);
       this.updateControls(options);
@@ -410,13 +411,14 @@ export default class ThreeMap {
       this.refDistance = this.camera!.position.length() * 1.2153;
       this.isInitCamera = true;
 
-      // ---- 背景与雾：深海军蓝 + 远处渐隐，让地图像悬在空间里 ----
-      this.setBackground();
+      // ---- 背景与雾：可画底色，也可以整体透明让页面背景透出来 ----
+      this.setBackground(options);
 
       // ---- 环境层（镜面 / 地面光圈 / 光柱）----
       this.setEnvironment(options);
       this.setFoundation(options);
-      this.lastSceneKey = `${options.mirror.show}|${options.scene.groundRing}|${options.scene.beams}|${options.glow.show}|${options.grid.show}|${options.foundation.show}`;
+      // 背景开关也参与 key：透明背景要把镜面从「深色底板」换成按倒影亮度取透明
+      this.lastSceneKey = `${options.background.show}|${options.mirror.show}|${options.scene.groundRing}|${options.scene.beams}|${options.glow.show}|${options.grid.show}|${options.foundation.show}`;
 
       this.drawDistrictArea(options.data, full.features, options);
       this.drawDistrictOutline(boundary.features, options);
@@ -529,7 +531,7 @@ export default class ThreeMap {
   updateEnvironment(options: ThreeMapOptions): void {
     if (!this.environmentGroup) return;
 
-    const key = `${options.mirror.show}|${options.scene.groundRing}|${options.scene.beams}|${options.glow.show}|${options.grid.show}|${options.foundation.show}`;
+    const key = `${options.background.show}|${options.mirror.show}|${options.scene.groundRing}|${options.scene.beams}|${options.glow.show}|${options.grid.show}|${options.foundation.show}`;
     if (this.lastSceneKey === key) return;
     this.lastSceneKey = key;
 
@@ -772,7 +774,8 @@ export default class ThreeMap {
     }
 
     if (options.mirror.show) {
-      this.mirrorHandle = drawMirror(width, this.scene!, this.camera!);
+      // 透明背景时镜面不留深色底板，只把倒影按亮度叠上去
+      this.mirrorHandle = drawMirror(width, this.scene!, this.camera!, !options.background.show);
       this.environmentGroup.add(this.mirrorHandle.mesh);
     }
   }
@@ -821,16 +824,21 @@ export default class ThreeMap {
   }
 
   /**
-   * 背景与雾：深海军蓝底 + 远处渐隐，地图像悬在空间里而不是贴在墙上。
+   * 背景与雾：show 打开时画深海军蓝底 + 远处渐隐，让地图像悬在空间里；
+   * show 关闭时什么都不要写，清屏 alpha 归零，画布透明、页面背景直接透出。
    * 参数按地图宽度换算（demo: 底色 #041533，雾 20~60，地图宽 15）。
    */
-  setBackground(): void {
+  setBackground(options: ThreeMapOptions): void {
     if (!this.scene) return;
-    const color = new THREE.Color('#041533');
-    this.scene.background = color;
+    const { show, color: bgColor } = options.background;
+    const color = new THREE.Color(bgColor);
     const w = this.mapWorldWidth;
-    this.scene.fog = new THREE.Fog(color, w * 1.33, w * 4);
-    this.renderer?.setClearColor(color, 1);
+
+    // scene.background 为 null 且 clearColor 的 alpha 为 0 时，renderer（alpha: true）
+    // 才不会往画布上刷底色；雾只在有底色时启用，否则会把远处图元染成一片深蓝。
+    this.scene.background = show ? color : null;
+    this.scene.fog = show ? new THREE.Fog(color, w * 1.33, w * 4) : null;
+    this.renderer?.setClearColor(show ? color : 0x000000, show ? 1 : 0);
   }
 
   /**

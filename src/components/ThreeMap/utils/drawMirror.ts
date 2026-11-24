@@ -48,8 +48,11 @@ export interface MirrorHandle {
  * 做法：把一面镜像虚拟相机看到的场景渲染到 fbo，再按深度做模糊，
  * 最后由 ReflectorMaterial 把结果投回地面平面。
  * 地图本体是半透明的，倒影会「映进去」，这是通透感的重要来源。
+ *
+ * @param transparent 透明背景模式：平面不再铺深色底板，透明度按倒影亮度取，
+ *                    没倒影的地方完全透明，露出页面/大屏自己的背景
  */
-export function drawMirror(mapWidth: number, scene: Scene, camera: PerspectiveCamera): MirrorHandle {
+export function drawMirror(mapWidth: number, scene: Scene, camera: PerspectiveCamera, transparent = false): MirrorHandle {
   const size = mapWidth * 6.66; // demo 里是 100 / 15（地图世界宽）
   const geometry = new THREE.PlaneGeometry(size, size);
   const mesh = new THREE.Mesh(geometry) as any;
@@ -85,6 +88,13 @@ export function drawMirror(mapWidth: number, scene: Scene, camera: PerspectiveCa
   material.defines = {};
   if (hasBlur) material.defines.USE_BLUR = '';
   if (DEPTH_SCALE > 0) material.defines.USE_DEPTH = '';
+  if (transparent) {
+    // 没有倒影的像素 alpha 为 0（见 ReflectorMaterial），底板色/光照不参与显示，
+    // 所以关掉深度写入，避免这块透明大平面挡住其他透明图元
+    material.defines.USE_ALPHA_BY_REFLECTION = '';
+    material.transparent = true;
+    material.depthWrite = false;
+  }
 
   const textureMatrix = new Matrix4();
   const u = material.reflection;

@@ -35,6 +35,7 @@
     - [主题里的 map 字段](#主题里的-map-字段)
   - [配置项（Options）详解](#配置项options详解)
     - [config — 地图基础配置](#config--地图基础配置)
+    - [background — 画布背景](#background--画布背景)
     - [camera — 相机位置](#camera--相机位置)
     - [itemStyle — 区域样式](#itemstyle--区域样式)
     - [label — 区域标注](#label--区域标注)
@@ -322,6 +323,22 @@ config: {
   disableZoom: false,     // 禁用缩放
 }
 ```
+
+---
+
+### background — 画布背景
+
+```ts
+background: {
+  show: false,             // false = 画布透明（默认），页面/大屏背景直接透出
+  color: '#041533',        // show=true 时的底色，雾也用它
+}
+```
+
+`show` 关掉时 `scene.background` 与清屏 alpha 一并归零，雾也停用（否则远处图元会被染成
+一片深蓝）；同时地面镜面会切成「按倒影亮度取透明度」，没倒影的地方完全透明，
+不会在大屏背景上留下一块深色矩形。调参台里的「透明背景」开关就是这个字段的反向开关，
+「导出配置」会把当前值一并写进主题。
 
 ---
 

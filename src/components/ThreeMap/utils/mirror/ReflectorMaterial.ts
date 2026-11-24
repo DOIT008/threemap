@@ -163,6 +163,12 @@ export class ReflectorMaterial extends MeshStandardMaterial {
       newMerge.b = (merge.b - 0.5) * mixContrast + 0.5;
 
       diffuseColor.rgb = diffuseColor.rgb * ((1.0 - min(1.0, mirror)) + newMerge.rgb * mixStrength);
+
+      #ifdef USE_ALPHA_BY_REFLECTION
+        // 透明背景模式：alpha 跟着倒影亮度走 —— 没倒影的空白地面完全透明，
+        // 既不会把大屏背景盖成一块深色矩形，倒影本身又能正常叠上去
+        diffuseColor.a *= smoothstep(0.02, 0.26, max(newMerge.r, max(newMerge.g, newMerge.b)));
+      #endif
       `,
     );
   }

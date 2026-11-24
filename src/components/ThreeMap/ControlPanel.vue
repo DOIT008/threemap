@@ -53,6 +53,26 @@ const surfaceMapColorHex = computed({
   },
 });
 
+const bgColorHex = computed({
+  get: () => colorToHex(props.options.background.color),
+  set: (hex: string) => {
+    props.options.background.color = hex;
+    emitApply();
+  },
+});
+
+/**
+ * 面板上的开关是「透明背景」，比「是否铺底色」更贴合使用场景；
+ * 存进 options 的仍然是 background.show（show=false 即透明）。
+ */
+const bgTransparent = computed({
+  get: () => !props.options.background.show,
+  set: (value: boolean) => {
+    props.options.background.show = !value;
+    emitApply();
+  },
+});
+
 const surfaceTintHex = computed({
   get: () => colorToHex(props.options.surface.tintColor),
   set: (hex: string) => {
@@ -314,6 +334,20 @@ function updateColorByHex(target: "topColor" | "sideColor" | "uColor" | "outLine
           <div class="panel-item">
             <span class="panel-label">地图深度:</span>
             <input class="number-input" type="number" v-model.number="props.options.config.depth" @change="emitApply" />
+          </div>
+          <div class="panel-item toggle">
+            <span class="panel-label">透明背景:</span>
+            <input
+              type="checkbox"
+              title="打开后画布不铺底色，页面/大屏背景直接透出；关掉则用下面的颜色铺底"
+              v-model="bgTransparent"
+            />
+          </div>
+          <div v-if="!bgTransparent" class="panel-item">
+            <span class="panel-label">背景颜色:</span>
+            <div class="color-input-group">
+              <input type="color" v-model="bgColorHex" />
+            </div>
           </div>
           <div class="panel-item toggle">
             <span class="panel-label">开启镜面:</span>
