@@ -24,21 +24,20 @@ const RANK_BGS = [rankBg1, rankBg2, rankBg3, rankBg4, rankBg5];
 const RANK_BDS = [rankBd1, rankBd2, rankBd3, rankBd4, rankBd5];
 const DOTS = [dot1, dot2, dot3, dot4, dot5];
 
+/** spec：条形填充宽 308 / 233.5 / 187 / 141.5 / 114.5（条总宽 382） */
+const PROGRESS = [80.6, 61.1, 49, 37, 30];
+
 const grown = ref(false);
 onMounted(() => {
   requestAnimationFrame(() => {
     grown.value = true;
   });
 });
-
-function pct(value: number): number {
-  return Math.max((value / data.max) * 100, 2);
-}
 </script>
 
 <template>
   <section class="p5">
-    <PanelTitle :img="titleImg" :width="442" :enter-left="188" />
+    <PanelTitle :img="titleImg" :width="442" :enter-left="180" :top="-11" />
 
     <ul class="p5__list">
       <li
@@ -60,13 +59,19 @@ function pct(value: number): number {
         <div class="p5__bar">
           <div
             class="p5__fill"
-            :style="{ width: grown ? `${pct(item.value)}%` : '0%', transitionDelay: `${i * 0.12}s` }"
+            :style="{
+              width: grown ? `${PROGRESS[i]}%` : '0%',
+              transitionDelay: `${i * 0.12}s`,
+            }"
           />
           <img
             class="p5__dot"
             :src="DOTS[i] ?? DOTS[0]!"
             alt=""
-            :style="{ left: grown ? `calc(${pct(item.value)}% - 9px)` : '-9px', transitionDelay: `${i * 0.12}s` }"
+            :style="{
+              left: grown ? `calc(${PROGRESS[i]}% - 9.5px)` : '-9.5px',
+              transitionDelay: `${i * 0.12}s`,
+            }"
           />
         </div>
       </li>
@@ -75,44 +80,38 @@ function pct(value: number): number {
 </template>
 
 <style scoped lang="scss">
-.p5 {
-  position: relative;
-  box-sizing: border-box;
-  width: 442px;
-  height: 232px;
-  flex: none;
-  background: linear-gradient(180deg, rgba(12, 32, 74, 0.42), rgba(6, 16, 42, 0.62));
-  border: 1px solid rgba(46, 100, 190, 0.32);
-  box-shadow: inset 0 0 26px rgba(20, 60, 140, 0.16);
+@use "./panel" as *;
 
+.p5 {
+  @include db-panel(210px);
+
+  // spec：列表 x=61(相对 23) y=875(相对 37)，宽 382，行距 32
   &__list {
+    position: absolute;
+    left: 23px;
+    top: 37px;
+    width: 382px;
     margin: 0;
-    padding: 8px 27px 0;
+    padding: 0;
     list-style: none;
   }
 
   &__row {
     position: relative;
-    height: 37px;
-    padding: 0 4px;
-    border-radius: 3px;
-    transition: background 0.2s ease;
+    height: 32px;
 
-    &:hover {
-      background: rgba(0, 140, 255, 0.08);
-
-      .p5__name {
-        color: rgba(230, 247, 255, 1);
-      }
+    &:hover .p5__name {
+      color: rgba(230, 247, 255, 1);
     }
   }
 
   &__head {
     display: flex;
-    align-items: center;
-    height: 20px;
+    align-items: flex-start;
+    height: 17px;
   }
 
+  // spec：序号 14×14
   &__rank {
     position: relative;
     width: 14px;
@@ -133,14 +132,17 @@ function pct(value: number): number {
       place-items: center;
       font-family: Roboto, "Segoe UI", Arial, sans-serif;
       font-size: 10px;
+      line-height: 10.5px;
       font-weight: 700;
       color: #ffffff;
     }
   }
 
+  // spec：名称 (81,875,14px 高 14)，距序号 6
   &__name {
-    margin-left: 12px;
+    margin-left: 6px;
     font-size: 12px;
+    line-height: 14px;
     color: rgba(198, 231, 255, 0.85);
     transition: color 0.2s ease;
     white-space: nowrap;
@@ -148,31 +150,37 @@ function pct(value: number): number {
     text-overflow: ellipsis;
   }
 
+  // spec：数值右端 427(相对 389)
   &__val {
     margin-left: auto;
     font-family: Roboto, "Segoe UI", Arial, sans-serif;
     font-size: 14px;
+    line-height: 17px;
     font-weight: 700;
     color: rgba(255, 255, 255, 1);
   }
 
+  // spec：单位 (431,877)
   &__unit {
-    margin-left: 5px;
+    margin-left: 4px;
+    margin-top: 2px;
     font-size: 12px;
+    line-height: 12px;
     color: rgba(108, 128, 151, 1);
   }
 
+  // spec：进度条 382×3，y=+22
   &__bar {
-    position: relative;
-    height: 6px;
-    margin-top: 4px;
-    border-radius: 3px;
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 22px;
+    height: 3px;
     background: rgba(20, 45, 95, 0.6);
   }
 
   &__fill {
     height: 100%;
-    border-radius: 3px;
     background: linear-gradient(90deg, #0057c0, #008cff 60%, #31d8d8);
     transition: width 1s cubic-bezier(0.22, 0.8, 0.3, 1);
   }
@@ -181,13 +189,13 @@ function pct(value: number): number {
     background: linear-gradient(90deg, #c04a2a, #f78160 70%, #ffb199);
   }
 
+  // spec：端点 5×5，切图 19×19 含光晕
   &__dot {
     position: absolute;
-    top: -6px;
+    top: -8px;
     width: 19px;
     height: 19px;
     transition: left 1s cubic-bezier(0.22, 0.8, 0.3, 1);
-    filter: drop-shadow(0 0 4px rgba(0, 140, 255, 0.6));
   }
 }
 </style>

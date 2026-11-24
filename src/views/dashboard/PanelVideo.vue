@@ -2,44 +2,43 @@
 import PanelTitle from "./PanelTitle.vue";
 import titleImg from "@/assets/codesign/panel-title-video.png";
 import offlineBg from "@/assets/codesign/video-offline-bg.png";
-import iconWifi from "@/assets/codesign/icon-wifi.png";
 import dashboard from "@/data/dashboard.json";
 
 const data = dashboard.videos;
 </script>
 
 <template>
-  <section class="pd">
-    <PanelTitle :img="titleImg" :width="442" :enter-left="237" />
+  <section class="pvv">
+    <PanelTitle :img="titleImg" :width="442" :enter-left="229" :top="-9" />
 
-    <div class="pd__list">
-      <div v-for="(video, i) in data.list" :key="video.name" class="pd__block" :class="`is-${video.status}`">
-        <!-- 在线：风格化大厅画面 + 扫描线 -->
+    <div class="pvv__list">
+      <div v-for="(video, i) in data.list" :key="video.name" class="pvv__block">
+        <!-- 在线：风格化大厅画面 -->
         <template v-if="video.status === 'live'">
-          <svg class="pd__scene" viewBox="0 0 127 121" preserveAspectRatio="xMidYMid slice">
+          <svg class="pvv__scene" viewBox="0 0 126 121" preserveAspectRatio="xMidYMid slice">
             <defs>
-              <linearGradient :id="`pd-wall-${i}`" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0" stop-color="#0e2c5e" />
-                <stop offset="1" stop-color="#071a3e" />
+              <linearGradient :id="`pvv-wall-${i}`" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="#173a72" />
+                <stop offset="1" stop-color="#0c2450" />
               </linearGradient>
-              <linearGradient :id="`pd-floor-${i}`" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0" stop-color="#123a74" />
-                <stop offset="1" stop-color="#081d42" />
+              <linearGradient :id="`pvv-floor-${i}`" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="#1a4480" />
+                <stop offset="1" stop-color="#0a1f47" />
               </linearGradient>
             </defs>
-            <rect width="127" height="78" :fill="`url(#pd-wall-${i})`" />
-            <rect y="78" width="127" height="43" :fill="`url(#pd-floor-${i})`" />
+            <rect width="126" height="78" :fill="`url(#pvv-wall-${i})`" />
+            <rect y="78" width="126" height="43" :fill="`url(#pvv-floor-${i})`" />
             <!-- 顶部灯带 -->
-            <rect x="10" y="8" width="30" height="3" rx="1.5" fill="#9fd4ff" opacity="0.55" />
-            <rect x="50" y="8" width="30" height="3" rx="1.5" fill="#9fd4ff" opacity="0.45" />
-            <rect x="90" y="8" width="27" height="3" rx="1.5" fill="#9fd4ff" opacity="0.5" />
+            <rect x="10" y="9" width="30" height="3" rx="1.5" fill="#9fd4ff" opacity="0.5" />
+            <rect x="50" y="9" width="30" height="3" rx="1.5" fill="#9fd4ff" opacity="0.42" />
+            <rect x="90" y="9" width="26" height="3" rx="1.5" fill="#9fd4ff" opacity="0.46" />
             <!-- 服务窗口 -->
-            <rect x="8" y="40" width="26" height="20" rx="2" fill="#1b4a8c" opacity="0.8" />
-            <rect x="50" y="40" width="26" height="20" rx="2" fill="#1b4a8c" opacity="0.7" />
-            <rect x="92" y="40" width="26" height="20" rx="2" fill="#1b4a8c" opacity="0.75" />
+            <rect x="8" y="40" width="26" height="20" rx="2" fill="#2a5da6" opacity="0.8" />
+            <rect x="50" y="40" width="26" height="20" rx="2" fill="#2a5da6" opacity="0.7" />
+            <rect x="92" y="40" width="26" height="20" rx="2" fill="#2a5da6" opacity="0.75" />
             <!-- 柜台 -->
-            <rect x="4" y="66" width="119" height="10" rx="2" fill="#2a5fa8" opacity="0.85" />
-            <rect x="4" y="66" width="119" height="2" fill="#7fc4ff" opacity="0.6" />
+            <rect x="4" y="66" width="118" height="10" rx="2" fill="#3570bd" opacity="0.85" />
+            <rect x="4" y="66" width="118" height="2" fill="#8fcbff" opacity="0.6" />
             <!-- 办事群众剪影 -->
             <g fill="#0a2450" opacity="0.9">
               <circle cx="30" cy="84" r="4" />
@@ -49,54 +48,58 @@ const data = dashboard.videos;
               <circle cx="98" cy="83" r="4" />
               <rect x="93" y="87" width="10" height="16" rx="4" />
             </g>
-            <!-- 地面反光 -->
-            <rect x="20" y="106" width="87" height="3" rx="1.5" fill="#3f7fd0" opacity="0.3" />
+            <rect x="20" y="106" width="86" height="3" rx="1.5" fill="#4f8fdd" opacity="0.3" />
           </svg>
-          <span class="pd__scanline" />
-          <span class="pd__live"><i />实时</span>
+          <span class="pvv__scanline" />
         </template>
-        <!-- 离线：官方占位切图 -->
+
+        <!-- 离线：官方切图（含四角标）+ 32×24 无信号图标 -->
         <template v-else>
-          <img class="pd__offline" :src="offlineBg" alt="" />
-          <img class="pd__wifi" :src="iconWifi" alt="" />
+          <img class="pvv__offline" :src="offlineBg" alt="" />
+          <span class="pvv__wifi" aria-hidden="true" />
         </template>
-        <span class="pd__name">{{ video.name }}</span>
+
+        <!-- spec：四个角标 5×4、1.5px rgba(102,255,255,1) -->
+        <template v-if="video.status === 'live'">
+          <span class="pvv__corner is-tl" />
+          <span class="pvv__corner is-tr" />
+          <span class="pvv__corner is-bl" />
+          <span class="pvv__corner is-br" />
+        </template>
       </div>
     </div>
   </section>
 </template>
 
 <style scoped lang="scss">
-.pd {
-  position: relative;
-  box-sizing: border-box;
-  width: 442px;
-  height: 199px;
-  flex: none;
-  background: linear-gradient(180deg, rgba(12, 32, 74, 0.42), rgba(6, 16, 42, 0.62));
-  border: 1px solid rgba(46, 100, 190, 0.32);
-  box-shadow: inset 0 0 26px rgba(20, 60, 140, 0.16);
+@use "./panel" as *;
 
+.pvv {
+  @include db-panel(179px);
+
+  // spec：三块 (1470/1610/1750,906) 126×121，步进 140 → 块间 14；面板内 left 14、top 37
   &__list {
+    position: absolute;
+    left: 14px;
+    top: 37px;
     display: flex;
-    gap: 8px;
-    padding: 12px 0 0 34px;
+    gap: 14px;
   }
 
   &__block {
     position: relative;
-    width: 127px;
+    flex: none;
+    width: 126px;
     height: 121px;
+    box-sizing: border-box;
+    border: 1px solid rgba(9, 96, 191, 1);
+    background: rgba(46, 90, 184, 0.46);
     overflow: hidden;
-    border: 1px solid rgba(46, 100, 190, 0.4);
-    border-radius: 3px;
-    background: rgba(8, 24, 58, 0.5);
-    transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
 
     &:hover {
-      border-color: rgba(0, 160, 255, 0.75);
-      box-shadow: 0 0 14px rgba(0, 120, 255, 0.3);
-      transform: translateY(-2px);
+      border-color: rgba(0, 180, 255, 0.9);
+      box-shadow: 0 0 14px rgba(0, 140, 255, 0.35);
     }
   }
 
@@ -105,7 +108,7 @@ const data = dashboard.videos;
     inset: 0;
     width: 100%;
     height: 100%;
-    animation: pd-kenburns 12s ease-in-out infinite alternate;
+    animation: pvv-kenburns 12s ease-in-out infinite alternate;
   }
 
   &__scanline {
@@ -113,87 +116,76 @@ const data = dashboard.videos;
     left: 0;
     right: 0;
     height: 2px;
-    background: linear-gradient(90deg, transparent, rgba(120, 220, 255, 0.5), transparent);
-    animation: pd-scan 4s linear infinite;
+    background: linear-gradient(90deg, transparent, rgba(120, 220, 255, 0.45), transparent);
+    animation: pvv-scan 4s linear infinite;
     pointer-events: none;
-  }
-
-  &__live {
-    position: absolute;
-    left: 6px;
-    top: 6px;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 1px 6px;
-    border-radius: 2px;
-    background: rgba(6, 16, 40, 0.7);
-    font-size: 10px;
-    color: rgba(230, 247, 255, 0.9);
-
-    i {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: #ff4d4f;
-      animation: pd-blink 1.2s ease-in-out infinite;
-    }
   }
 
   &__offline {
     position: absolute;
     inset: 0;
-    width: 127px;
+    width: 126px;
     height: 121px;
   }
 
+  // spec：路径 1 (1797,955,32×24)，填充 rgba(184,228,253,0.34)
   &__wifi {
     position: absolute;
-    left: 50%;
-    top: 40px;
-    transform: translateX(-50%);
+    left: 47px;
+    top: 45px;
     width: 32px;
     height: 32px;
-    opacity: 0.8;
+    background: rgba(184, 228, 253, 0.34);
+    -webkit-mask: url("@/assets/codesign/icon-wifi.png") no-repeat center / contain;
+    mask: url("@/assets/codesign/icon-wifi.png") no-repeat center / contain;
   }
 
-  &__name {
+  // spec：路径 7 —— 5×4，四角
+  &__corner {
     position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 8px;
-    text-align: center;
-    font-size: 12px;
-    color: rgba(198, 231, 255, 0.85);
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+    width: 5px;
+    height: 4px;
+    box-sizing: border-box;
+    border: 1.5px solid rgba(102, 255, 255, 1);
+    pointer-events: none;
+
+    &.is-tl {
+      left: 0.86px;
+      top: 1px;
+    }
+
+    &.is-tr {
+      left: 120.14px;
+      top: 1px;
+    }
+
+    &.is-bl {
+      left: 1px;
+      top: 116px;
+    }
+
+    &.is-br {
+      left: 120.27px;
+      top: 116px;
+    }
   }
 }
 
-@keyframes pd-kenburns {
+@keyframes pvv-kenburns {
   from {
     transform: scale(1) translateX(0);
   }
   to {
-    transform: scale(1.12) translateX(-4px);
+    transform: scale(1.1) translateX(-3px);
   }
 }
 
-@keyframes pd-scan {
+@keyframes pvv-scan {
   0% {
     top: 0;
   }
   100% {
     top: 100%;
-  }
-}
-
-@keyframes pd-blink {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.25;
   }
 }
 </style>

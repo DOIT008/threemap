@@ -10,10 +10,14 @@ const data = dashboard.trend;
 const dots = [dotOrange, dotCyan];
 
 // ==================== 坐标系 ====================
-const X0 = 64;
-const X1 = 426;
-const Y0 = 140;
-const Y_TOP = 28;
+// spec：X 轴 9.20 中心 77、9.28 中心 400；Y 轴 0 在 176、20000 在 64
+const X0 = 77;
+const X1 = 400;
+const Y0 = 176;
+const Y_TOP = 64;
+/** spec：网格线 x 65..409 */
+const GRID_X0 = 65;
+const GRID_X1 = 409;
 const N = data.dates.length;
 
 function px(i: number): number {
@@ -34,7 +38,8 @@ const lines = computed(() =>
 );
 const areas = computed(() =>
   data.series.map(
-    (s) => `M ${px(0)} ${Y0} L ${s.data.map((v, i) => `${px(i)} ${py(v)}`).join(" L ")} L ${px(N - 1)} ${Y0} Z`,
+    (s) =>
+      `M ${px(0)} ${Y0} L ${s.data.map((v, i) => `${px(i)} ${py(v)}`).join(" L ")} L ${px(N - 1)} ${Y0} Z`,
   ),
 );
 
@@ -50,19 +55,20 @@ onMounted(() => {
 const hoverI = ref<number | null>(null);
 function onMove(evt: MouseEvent): void {
   const rect = (evt.currentTarget as SVGSVGElement).getBoundingClientRect();
-  const x = ((evt.clientX - rect.left) / rect.width) * 442;
+  const x = ((evt.clientX - rect.left) / rect.width) * 432;
   const i = Math.round(((x - X0) / (X1 - X0)) * (N - 1));
   hoverI.value = Math.max(0, Math.min(N - 1, i));
 }
 const tipLeft = computed(() => {
   if (hoverI.value === null) return 0;
-  return Math.max(8, Math.min(px(hoverI.value) - 62, 318));
+  return Math.max(8, Math.min(px(hoverI.value) - 62, 308));
 });
 </script>
 
 <template>
   <section class="pt">
-    <PanelTitle :img="titleImg" :width="442" :enter-left="285" />
+    <PanelTitle :img="titleImg" :width="442" :enter-left="277" :top="-10" />
+
     <span class="pt__unit">{{ data.unit }}</span>
     <div class="pt__legend">
       <span v-for="(name, i) in data.legend" :key="name" class="pt__legend-item">
@@ -71,19 +77,35 @@ const tipLeft = computed(() => {
     </div>
 
     <div class="pt__chart">
-      <svg viewBox="0 0 442 170" @mousemove="onMove" @mouseleave="hoverI = null">
+      <svg viewBox="0 0 432 209" @mousemove="onMove" @mouseleave="hoverI = null">
         <defs>
-          <linearGradient v-for="(s, i) in data.series" :id="`pt-area-${i}`" :key="s.name" x1="0" y1="0" x2="0" y2="1">
+          <linearGradient
+            v-for="(s, i) in data.series"
+            :id="`pt-area-${i}`"
+            :key="s.name"
+            x1="0"
+            y1="0"
+            x2="0"
+            y2="1"
+          >
             <stop offset="0" :stop-color="s.color" stop-opacity="0.3" />
             <stop offset="1" :stop-color="s.color" stop-opacity="0" />
           </linearGradient>
         </defs>
 
         <g v-for="g in gridLines" :key="g.v">
-          <line :x1="X0" :x2="X1" :y1="g.y" :y2="g.y" stroke="rgba(70,110,180,0.25)" stroke-dasharray="3 4" />
-          <text :x="X0 - 8" :y="g.y + 4" text-anchor="end" class="pt__axis">{{ g.v }}</text>
+          <line
+            :x1="GRID_X0"
+            :x2="GRID_X1"
+            :y1="g.y"
+            :y2="g.y"
+            stroke="rgba(172,224,255,0.2)"
+          />
+          <text x="55" :y="g.y" text-anchor="end" dominant-baseline="middle" class="pt__axis">
+            {{ g.v }}
+          </text>
         </g>
-        <text v-for="(d, i) in data.dates" :key="d" :x="px(i)" :y="158" text-anchor="middle" class="pt__axis">
+        <text v-for="(d, i) in data.dates" :key="d" :x="px(i)" y="193" text-anchor="middle" class="pt__axis">
           {{ d }}
         </text>
 
@@ -122,7 +144,14 @@ const tipLeft = computed(() => {
         </template>
 
         <g v-if="hoverI !== null">
-          <line :x1="px(hoverI)" :x2="px(hoverI)" :y1="Y_TOP" :y2="Y0" stroke="rgba(120,200,255,0.5)" stroke-dasharray="3 3" />
+          <line
+            :x1="px(hoverI)"
+            :x2="px(hoverI)"
+            :y1="Y_TOP"
+            :y2="Y0"
+            stroke="rgba(120,200,255,0.5)"
+            stroke-dasharray="3 3"
+          />
         </g>
       </svg>
 
@@ -138,37 +167,36 @@ const tipLeft = computed(() => {
 </template>
 
 <style scoped lang="scss">
-.pt {
-  position: relative;
-  box-sizing: border-box;
-  width: 442px;
-  height: 236px;
-  flex: none;
-  background: linear-gradient(180deg, rgba(12, 32, 74, 0.42), rgba(6, 16, 42, 0.62));
-  border: 1px solid rgba(46, 100, 190, 0.32);
-  box-shadow: inset 0 0 26px rgba(20, 60, 140, 0.16);
+@use "./panel" as *;
 
+.pt {
+  @include db-panel(209px);
+
+  // spec：单位：件 (59,633) → 相对 (21,32)
   &__unit {
     position: absolute;
-    left: 31px;
-    top: 38px;
+    left: 21px;
+    top: 32px;
     font-size: 12px;
+    line-height: 15px;
     color: rgba(198, 231, 255, 0.7);
   }
 
+  // spec：图例 (329,638) 起，右侧留 23
   &__legend {
     position: absolute;
-    right: 24px;
-    top: 38px;
+    right: 23px;
+    top: 33px;
     display: flex;
-    gap: 16px;
+    gap: 14px;
   }
 
   &__legend-item {
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: 8px;
     font-size: 12px;
+    line-height: 18px;
     color: rgba(198, 231, 255, 0.85);
 
     img {
@@ -178,13 +206,13 @@ const tipLeft = computed(() => {
   }
 
   &__chart {
-    position: relative;
-    margin-top: 28px;
+    position: absolute;
+    inset: 0;
 
     svg {
       display: block;
-      width: 442px;
-      height: 170px;
+      width: 432px;
+      height: 209px;
       cursor: crosshair;
     }
   }
@@ -219,7 +247,7 @@ const tipLeft = computed(() => {
 
   &__tip {
     position: absolute;
-    top: 26px;
+    top: 60px;
     min-width: 124px;
     padding: 6px 10px;
     background: rgba(8, 20, 45, 0.92);

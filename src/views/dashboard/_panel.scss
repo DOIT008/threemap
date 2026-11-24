@@ -1,0 +1,39 @@
+// 面板底板规格，取自 CoDesign spec 中 Rectangle 4054–4062（9 个面板完全一致）
+//
+// css: width/height; border-radius: 4px; opacity: 0.5;
+//      background: linear-gradient(0deg, rgba(9,32,118,1) 0%, rgba(6,25,106,0) 100%);
+// border[0]: radial-gradient(21.5% 21.5% at 59.6% 109.4%, rgba(59,237,255,1) 0%, rgba(24,192,255,0) 100%)
+// border[1]: linear-gradient(0deg, rgba(10,166,253,0.63) 0%, rgba(9,97,193,0) 100%)
+//
+// 整体 opacity 0.5 会连内容一起变淡，故把 alpha 乘进各层颜色里。
+@mixin db-panel($height, $width: 432px) {
+  position: relative;
+  box-sizing: border-box;
+  width: $width;
+  height: $height;
+  flex: none;
+  border-radius: 4px;
+  background: linear-gradient(0deg, rgba(9, 32, 118, 0.5) 0%, rgba(6, 25, 106, 0) 100%);
+
+  // 两条 1px 渐变描边叠加，用 mask 掏空内容区
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    padding: 1px;
+    border-radius: inherit;
+    background:
+      radial-gradient(
+        21.5% 21.5% at 59.6% 109.4%,
+        rgba(59, 237, 255, 0.5) 0%,
+        rgba(24, 192, 255, 0) 100%
+      ),
+      linear-gradient(0deg, rgba(10, 166, 253, 0.315) 0%, rgba(9, 97, 193, 0) 100%);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+}

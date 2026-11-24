@@ -24,7 +24,7 @@ const PLATES = [cardRed, cardYellow, cardBlue];
 
 <template>
   <section class="ps">
-    <PanelTitle :img="titleImg" :width="442" :enter-left="152" />
+    <PanelTitle :img="titleImg" :width="442" :enter-left="144" :top="-7" />
 
     <div class="ps__tabs">
       <button
@@ -51,8 +51,6 @@ const PLATES = [cardRed, cardYellow, cardBlue];
       </div>
     </div>
 
-    <img class="ps__divider" :src="dividerImg" alt="" />
-
     <div class="ps__brands">
       <span class="ps__brands-title">电子监察 · 红黄蓝牌</span>
       <div v-for="(card, i) in current.cards" :key="card.label" class="ps__brand">
@@ -63,27 +61,25 @@ const PLATES = [cardRed, cardYellow, cardBlue];
         </span>
       </div>
     </div>
+
+    <img class="ps__divider" :src="dividerImg" alt="" />
   </section>
 </template>
 
 <style scoped lang="scss">
-.ps {
-  position: relative;
-  box-sizing: border-box;
-  width: 442px;
-  height: 270px;
-  flex: none;
-  background: linear-gradient(180deg, rgba(12, 32, 74, 0.42), rgba(6, 16, 42, 0.62));
-  border: 1px solid rgba(46, 100, 190, 0.32);
-  box-shadow: inset 0 0 26px rgba(20, 60, 140, 0.16);
+@use "./panel" as *;
 
+.ps {
+  @include db-panel(245px);
+
+  // spec：本年 (1795,606) → 相对 (339,9)
   &__tabs {
     position: absolute;
-    top: 16px;
-    right: 33px;
+    top: 9px;
+    right: 19px;
     display: flex;
-    gap: 12px;
-    z-index: 2;
+    gap: 28px;
+    z-index: 3;
   }
 
   &__tab {
@@ -91,7 +87,8 @@ const PLATES = [cardRed, cardYellow, cardBlue];
     border: none;
     background: none;
     cursor: pointer;
-    font-size: 12px;
+    font-size: 14px;
+    line-height: 21px;
     color: rgba(161, 183, 217, 1);
     transition: color 0.2s ease;
 
@@ -99,11 +96,13 @@ const PLATES = [cardRed, cardYellow, cardBlue];
       position: relative;
 
       &::before {
-        content: "|";
+        content: "";
         position: absolute;
-        left: -9px;
-        color: rgba(113, 144, 205, 0.5);
-        font-weight: 400;
+        left: -18px;
+        top: 6px;
+        width: 1px;
+        height: 10px;
+        background: rgba(113, 144, 205, 0.5);
       }
     }
 
@@ -113,38 +112,36 @@ const PLATES = [cardRed, cardYellow, cardBlue];
 
     &.is-active {
       color: rgba(0, 140, 255, 1);
-      font-weight: 700;
       text-shadow: 0 0 8px rgba(0, 140, 255, 0.55);
     }
   }
 
+  // spec：矩形 7 —— 195×68，列 18/221，行 30/107
   &__grid {
+    position: absolute;
+    left: 18px;
+    top: 30px;
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-    padding: 10px 24px 0;
+    grid-template-columns: 195px 195px;
+    column-gap: 8px;
+    row-gap: 9px;
   }
 
   &__card {
     display: flex;
     align-items: center;
-    gap: 10px;
-    height: 62px;
-    padding: 0 10px;
+    height: 68px;
+    padding-left: 17px;
+    box-sizing: border-box;
+    border-radius: 2px;
     background: linear-gradient(180deg, rgba(16, 44, 96, 0.45), rgba(8, 24, 58, 0.55));
-    border: 1px solid rgba(46, 100, 190, 0.4);
-    border-radius: 3px;
-    transition: border-color 0.2s ease, box-shadow 0.2s ease;
-
-    &:hover {
-      border-color: rgba(0, 160, 255, 0.7);
-      box-shadow: 0 0 12px rgba(0, 120, 255, 0.25);
-    }
+    transition: background 0.2s ease;
   }
 
+  // spec：图标 46×46 at 卡片内 (17,11)
   &__frame {
     position: relative;
-    width: 47px;
+    width: 46px;
     height: 50px;
     flex: none;
   }
@@ -152,29 +149,32 @@ const PLATES = [cardRed, cardYellow, cardBlue];
   &__frame-bg {
     position: absolute;
     inset: 0;
-    width: 47px;
+    width: 46px;
     height: 50px;
   }
 
   &__frame-icon {
     position: absolute;
     left: 50%;
-    top: 45%;
+    top: 50%;
     transform: translate(-50%, -50%);
-    width: 24px;
-    height: 24px;
+    width: 46px;
+    height: 46px;
     object-fit: contain;
   }
 
+  // spec：标签 (1556,640) → 卡片内 (82,13)；数值 (1555,660) → (81,33)
   &__card-text {
     display: flex;
     flex-direction: column;
-    gap: 5px;
+    gap: 6px;
+    margin-left: 19px;
     min-width: 0;
   }
 
   &__card-label {
     font-size: 12px;
+    line-height: 14px;
     color: rgba(198, 231, 255, 0.75);
     white-space: nowrap;
     overflow: hidden;
@@ -184,27 +184,26 @@ const PLATES = [cardRed, cardYellow, cardBlue];
   &__card-val {
     font-family: Roboto, "Segoe UI", Arial, sans-serif;
     font-size: 18px;
+    line-height: 22px;
     font-weight: 700;
     color: rgba(255, 255, 255, 1);
     text-shadow: 0 0 7px rgba(36, 160, 255, 0.45);
   }
 
-  &__divider {
-    display: block;
-    width: 392px;
-    height: 14px;
-    margin: 8px auto 0;
-  }
-
+  // spec：标题 (1480,793) → 相对 (24,196)
   &__brands {
+    position: absolute;
+    left: 24px;
+    top: 196px;
     display: flex;
     align-items: center;
-    gap: 18px;
-    padding: 4px 28px 0;
+    gap: 12px;
   }
 
   &__brands-title {
+    margin-right: 6px;
     font-size: 14px;
+    line-height: 21px;
     color: rgba(198, 231, 255, 0.9);
     white-space: nowrap;
   }
@@ -212,14 +211,18 @@ const PLATES = [cardRed, cardYellow, cardBlue];
   &__brand {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
   }
 
   &__brand-label {
+    width: 24px;
     font-size: 12px;
+    line-height: 18px;
     color: rgba(198, 231, 255, 0.75);
+    white-space: nowrap;
   }
 
+  // spec：牌 40×22
   &__plate {
     position: relative;
     width: 40px;
@@ -235,15 +238,26 @@ const PLATES = [cardRed, cardYellow, cardBlue];
 
     b {
       position: absolute;
-      inset: 0;
-      display: grid;
-      place-items: center;
+      left: 0;
+      right: 0;
+      top: -8px;
+      text-align: center;
       font-family: Roboto, "Segoe UI", Arial, sans-serif;
       font-size: 14px;
+      line-height: 19px;
       font-weight: 700;
       color: #ffffff;
       text-shadow: 0 0 6px rgba(0, 0, 0, 0.5);
     }
+  }
+
+  // spec：分隔条 (1480,816,392×14) → 相对 (24,219)
+  &__divider {
+    position: absolute;
+    left: 24px;
+    top: 213px;
+    width: 392px;
+    height: 14px;
   }
 }
 
