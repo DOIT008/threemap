@@ -1097,6 +1097,7 @@ export default class ThreeMap {
       // 不开入场动画时流光就是常态尾长
       this.trailLayer?.setTrailLength?.(options.scene.trailLength);
       this.introDone = true;
+      this.emit("intro-end");
       return;
     }
 
@@ -1188,6 +1189,8 @@ export default class ThreeMap {
         this.setIntroLineOpacity(1);
         this.trailLayer?.setTrailLength?.(trailTail);
         this.introDone = true;
+        // 地图彻底长完、透明度回满：外面（大屏页面）可以开始第二段进场了
+        this.emit("intro-end");
         this.introFrame = null;
       }
     };
@@ -1843,5 +1846,13 @@ export default class ThreeMap {
     } else {
       this.events[eventName] = [cb];
     }
+  }
+
+  /**
+   * 触发事件（目前只有入场动画结束的 intro-end：页面里两侧面板要等它之后再移入）。
+   */
+  emit(eventName: string, data?: any): void {
+    const events = this.events[eventName];
+    events && events.forEach((callback) => callback(data));
   }
 }

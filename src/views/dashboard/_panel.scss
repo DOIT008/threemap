@@ -37,3 +37,33 @@
     pointer-events: none;
   }
 }
+
+// 数据卡内框：1px 渐变描边，用的是面板底板 border 同一套两层渐变
+// （底部青色径向高光 + 自下而上的蓝色线性渐变，顶边基本为 0）。
+//
+// spec 里每张卡（用户数的长卡、政务监管的 4 张统计卡…）都有这一圈线。
+// 用 mask 掏空内容区，1px 描边不会把里面的图标/文字盖住。
+@mixin db-card-frame($radius: 4px, $line: 1px) {
+  border-radius: $radius;
+
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    padding: $line;
+    border-radius: inherit;
+    background:
+      radial-gradient(
+        21.5% 21.5% at 59.6% 109.4%,
+        rgba(59, 237, 255, 0.5) 0%,
+        rgba(24, 192, 255, 0) 100%
+      ),
+      linear-gradient(0deg, rgba(10, 166, 253, 0.315) 0%, rgba(9, 97, 193, 0) 100%);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+}

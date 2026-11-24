@@ -62,15 +62,14 @@ const ICON_SETS = [
 .pu {
   @include db-panel(238px);
 
-  // spec：矩形 2 —— (1486,371,371×71) → 相对 (30,35)
+  // spec：矩形 2 —— (1486,371,371×71) → 相对 (30,35)；底板直接用切图（框线、中间分隔缝都在图里）
   &__card {
     position: absolute;
     left: 30px;
     top: 35px;
     width: 371px;
     height: 71px;
-    border-radius: 2px;
-    background: linear-gradient(0deg, rgba(16, 44, 96, 0.5) 0%, rgba(8, 24, 58, 0.2) 100%);
+    background: url("@/assets/codesign/users-card-bg.png") no-repeat center / 100% 100%;
   }
 
   &__label {
@@ -112,10 +111,12 @@ const ICON_SETS = [
   }
 
   // spec：头像环 78×78 at (1633,368) → 卡片内 (147,-3)
+  // 头像压在切图的中间分隔缝上，得盖在底板之上
   &__avatar {
     position: absolute;
     left: 147px;
     top: -3px;
+    z-index: 2;
     width: 78px;
     height: 78px;
     animation: pu-glow 3s ease-in-out infinite;

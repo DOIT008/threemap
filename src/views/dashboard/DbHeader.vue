@@ -80,7 +80,7 @@ const timeText = computed(() => {
   }
 
   // 溜光：一缕光头沿着亮边脊线跑。四层同一条 d，靠 dash 长度差叠出
-  // “亮头 + 短尾焰”，叠加后总长度约 120px，再长就不像溜光而像一条亮线了
+  // “亮头 + 短尾焰”。叠起来总长约 40px（原来 120 太长，看着像一条亮线）
   &__flow {
     position: absolute;
     inset: 0;
@@ -94,39 +94,42 @@ const timeText = computed(() => {
       fill: none;
       stroke-linecap: round;
       stroke-linejoin: round;
+      // 四层共用一个 dash 周期 2400，各自用 --flow-base 把「亮头」对齐（见 @keyframes）
+      animation: db-flow-run 6s linear infinite;
     }
   }
 
   // 四层的 dash 周期都是 2400（> 轨迹长 2068，保证同一时刻线上只有一颗光头），
-  // 长度从长到短、亮度从暗到亮，头部对齐
+  // 长度从长到短、亮度从暗到亮，头部对齐：长的那层往后拖、短的那层贴着头部，
+  // 叠出来就是「亮的那头在前，旁边往后拖一圈淡尾」。
   &__flow-halo {
+    --flow-base: 0px;
     stroke: rgba(70, 185, 255, 0.34);
     stroke-width: 4.6;
     filter: blur(2.4px);
-    stroke-dasharray: 120 2280;
-    animation: db-flow-run 6s linear infinite;
+    stroke-dasharray: 40 2360;
   }
 
   &__flow-tail {
+    --flow-base: -14px;
     stroke: rgba(130, 222, 255, 0.3);
     stroke-width: 2.6;
-    stroke-dasharray: 78 2322;
-    animation: db-flow-run 6s linear infinite;
+    stroke-dasharray: 26 2374;
   }
 
   &__flow-mid {
+    --flow-base: -24px;
     stroke: rgba(196, 241, 255, 0.55);
     stroke-width: 1.8;
-    stroke-dasharray: 48 2352;
-    animation: db-flow-run 6s linear infinite;
+    stroke-dasharray: 16 2384;
   }
 
   &__flow-core {
+    --flow-base: -31px;
     stroke: #f2feff;
     stroke-width: 1.2;
     filter: drop-shadow(0 0 2px rgba(150, 225, 255, 0.9));
-    stroke-dasharray: 26 2374;
-    animation: db-flow-run 6s linear infinite;
+    stroke-dasharray: 9 2391;
   }
 
   &__org {
@@ -154,13 +157,16 @@ const timeText = computed(() => {
 
 // 光头沿轨迹跑一遍：跑到 -2400（一个 dash 周期）时上一颗刚好穿出画布右侧、
 // 下一颗刚好从左侧画布外冒头，所以看不出接缝；剩下 22% 的时间留白（6s 一轮）
+//
+// 四层的「亮头」要对齐：头部位置 = dash 长 − dashoffset，所以 dash 越短、
+// --flow-base 越负，尾巴才会落在头后面 —— 这样亮的那头在前，而不是被尾巴拽着跑。
 @keyframes db-flow-run {
   0% {
-    stroke-dashoffset: 0;
+    stroke-dashoffset: var(--flow-base, 0px);
   }
   78%,
   100% {
-    stroke-dashoffset: -2400;
+    stroke-dashoffset: calc(var(--flow-base, 0px) - 2400px);
   }
 }
 </style>

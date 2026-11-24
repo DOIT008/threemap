@@ -127,13 +127,16 @@ const PLATES = [cardRed, cardYellow, cardBlue];
     row-gap: 9px;
   }
 
+  // spec：195×68 统计卡，圆角 4、1px 渐变描边（跟面板底板同一套渐变）
   &__card {
+    @include db-card-frame(4px);
+
+    position: relative;
     display: flex;
     align-items: center;
     height: 68px;
     padding-left: 17px;
     box-sizing: border-box;
-    border-radius: 2px;
     background: linear-gradient(180deg, rgba(16, 44, 96, 0.45), rgba(8, 24, 58, 0.55));
     transition: background 0.2s ease;
   }

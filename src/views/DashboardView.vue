@@ -18,6 +18,12 @@ import DbMapMarkers from "./dashboard/DbMapMarkers.vue";
 import { STAGE } from "./dashboard/constants";
 import dashboardTheme from "@/themes/dashboard";
 
+// ==================== 第二阶段进场 ====================
+// 两侧面板 + 底部电子证照要等地图完全长出来（ThreeMap 的 intro-end）再移入，
+// 不然面板先于地图出现，主次就乱了
+const panelsIn = ref(false);
+let panelsFallback = 0;
+
 // ==================== 退出大屏 ====================
 const router = useRouter();
 function exitFullscreen(): void {
@@ -35,9 +41,14 @@ function fit(): void {
 onMounted(() => {
   fit();
   window.addEventListener("resize", fit);
+  // 兜底：地图没加载出来（报错、被跳过）也要把面板放出来，不能一直空着
+  panelsFallback = window.setTimeout(() => {
+    panelsIn.value = true;
+  }, 8000);
 });
 onBeforeUnmount(() => {
   window.removeEventListener("resize", fit);
+  clearTimeout(panelsFallback);
 });
 </script>
 
@@ -49,10 +60,30 @@ onBeforeUnmount(() => {
       <main class="db-main">
         <!-- 左列：spec 面板间距 25 / 27 / 28 -->
         <div class="db-col">
-          <div class="db-slot" style="animation-delay: 0.05s"><PanelVolume /></div>
-          <div class="db-slot" style="animation-delay: 0.15s; margin-top: 25px"><PanelEfficiency /></div>
-          <div class="db-slot" style="animation-delay: 0.25s; margin-top: 27px"><PanelTrend /></div>
-          <div class="db-slot" style="animation-delay: 0.35s; margin-top: 28px"><PanelTop5 /></div>
+          <div class="db-slot db-slot--edge db-slot--left" :class="{ 'is-in': panelsIn }" style="--in-delay: 0s">
+            <PanelVolume />
+          </div>
+          <div
+            class="db-slot db-slot--edge db-slot--left"
+            :class="{ 'is-in': panelsIn }"
+            style="--in-delay: 0.08s; margin-top: 25px"
+          >
+            <PanelEfficiency />
+          </div>
+          <div
+            class="db-slot db-slot--edge db-slot--left"
+            :class="{ 'is-in': panelsIn }"
+            style="--in-delay: 0.16s; margin-top: 27px"
+          >
+            <PanelTrend />
+          </div>
+          <div
+            class="db-slot db-slot--edge db-slot--left"
+            :class="{ 'is-in': panelsIn }"
+            style="--in-delay: 0.24s; margin-top: 28px"
+          >
+            <PanelTop5 />
+          </div>
         </div>
 
         <!-- 中列：KPI 条 + 郑州 3D 地图 + 本年办件量卡片 + 电子证照 -->
@@ -61,21 +92,50 @@ onBeforeUnmount(() => {
 
           <div class="db-map">
             <div class="db-map__three">
-              <ThreeMap :option="dashboardTheme" :panel="false" :legend="false" area="410100" area-name="郑州" />
+              <ThreeMap
+                :option="dashboardTheme"
+                :panel="false"
+                :legend="false"
+                area="410100"
+                area-name="郑州"
+                @intro-end="panelsIn = true"
+              />
             </div>
             <!-- <DbMapMarkers /> -->
             <DbYearCards />
           </div>
 
-          <div class="db-slot" style="animation-delay: 0.45s"><PanelELicense /></div>
+          <div class="db-slot db-slot--edge db-slot--bottom" :class="{ 'is-in': panelsIn }" style="--in-delay: 0.32s">
+            <PanelELicense />
+          </div>
         </div>
 
         <!-- 右列：spec 面板间距 26 / 23 / 27 -->
         <div class="db-col">
-          <div class="db-slot" style="animation-delay: 0.1s"><PanelAffairs /></div>
-          <div class="db-slot" style="animation-delay: 0.2s; margin-top: 26px"><PanelUsers /></div>
-          <div class="db-slot" style="animation-delay: 0.3s; margin-top: 23px"><PanelSupervision /></div>
-          <div class="db-slot" style="animation-delay: 0.4s; margin-top: 27px"><PanelVideo /></div>
+          <div class="db-slot db-slot--edge db-slot--right" :class="{ 'is-in': panelsIn }" style="--in-delay: 0.04s">
+            <PanelAffairs />
+          </div>
+          <div
+            class="db-slot db-slot--edge db-slot--right"
+            :class="{ 'is-in': panelsIn }"
+            style="--in-delay: 0.12s; margin-top: 26px"
+          >
+            <PanelUsers />
+          </div>
+          <div
+            class="db-slot db-slot--edge db-slot--right"
+            :class="{ 'is-in': panelsIn }"
+            style="--in-delay: 0.2s; margin-top: 23px"
+          >
+            <PanelSupervision />
+          </div>
+          <div
+            class="db-slot db-slot--edge db-slot--right"
+            :class="{ 'is-in': panelsIn }"
+            style="--in-delay: 0.28s; margin-top: 27px"
+          >
+            <PanelVideo />
+          </div>
         </div>
       </main>
 
@@ -138,6 +198,7 @@ onBeforeUnmount(() => {
 }
 
 // ==================== 面板入场 ====================
+// 中列 KPI 条属于地图那块，页面一进来就淡入
 .db-slot {
   animation: db-in 0.7s cubic-bezier(0.22, 0.8, 0.3, 1) both;
 }
@@ -151,6 +212,34 @@ onBeforeUnmount(() => {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+// 两侧面板 + 底部电子证照：先藏着，等地图完全长出来再从画面外侧移入。
+// 左列从左边推、右列从右边推、底部从下方托上来；--in-delay 控制逐块错开的节奏。
+.db-slot--edge {
+  opacity: 0;
+  animation: none;
+  will-change: transform, opacity;
+  transition:
+    opacity 0.5s ease var(--in-delay, 0s),
+    transform 0.68s cubic-bezier(0.22, 0.8, 0.3, 1) var(--in-delay, 0s);
+}
+
+.db-slot--left {
+  transform: translateX(-64px);
+}
+
+.db-slot--right {
+  transform: translateX(64px);
+}
+
+.db-slot--bottom {
+  transform: translateY(30px);
+}
+
+.db-slot--edge.is-in {
+  opacity: 1;
+  transform: none;
 }
 
 // ==================== 三栏 ====================

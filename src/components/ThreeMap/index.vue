@@ -48,6 +48,13 @@ interface MapListItem {
   mapJson: GeoJsonFeatureCollection;
 }
 
+// ==================== Emits ====================
+/**
+ * intro-end：入场动画（相机推进 + 地图长厚 + 淡入）彻底跑完。
+ * 大屏页面靠它把两侧面板押到地图之后才移入，不然面板会先于地图出现。
+ */
+const emit = defineEmits<{ (e: "intro-end"): void }>();
+
 type SeriesType = "marker" | "flight" | "prism" | "scatter" | "cylinder";
 
 /**
@@ -427,6 +434,8 @@ watch(
 
 onMounted(() => {
   map = new ThreeMap(mapRef.value!, tooltipRef.value!);
+  // 入场跑完向外转一道：页面拿它触发第二段进场
+  map.on("intro-end", () => emit("intro-end"));
 
   // 调试开关：URL 带 ?freeze=1 时冻结所有 time 型动画（飞线流光、光柱漂移、
   // 光圈自转、顶点流光、侧面条纹），画面完全静止。
