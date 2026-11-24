@@ -39,6 +39,7 @@ const kpiIcons = [kpiIconTotal, kpiIconMonth, kpiIconDaily, kpiIconRate];
   height: 187px;
   flex: none;
   margin: 0px auto 0;
+  position: absolute;
 
   &__bg {
     position: absolute;

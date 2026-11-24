@@ -16,6 +16,7 @@ import DbKpiBar from "./dashboard/DbKpiBar.vue";
 import DbYearCards from "./dashboard/DbYearCards.vue";
 import DbMapMarkers from "./dashboard/DbMapMarkers.vue";
 import { STAGE } from "./dashboard/constants";
+import dashboardTheme from "@/themes/dashboard";
 
 // ==================== 退出大屏 ====================
 const router = useRouter();
@@ -60,9 +61,9 @@ onBeforeUnmount(() => {
 
           <div class="db-map">
             <div class="db-map__three">
-              <ThreeMap :panel="false" :legend="false" area="410100" area-name="郑州" />
+              <ThreeMap :option="dashboardTheme" :panel="false" :legend="false" area="410100" area-name="郑州" />
             </div>
-            <DbMapMarkers />
+            <!-- <DbMapMarkers /> -->
             <DbYearCards />
           </div>
 
@@ -175,18 +176,20 @@ onBeforeUnmount(() => {
 
 .db-center {
   width: 885px;
+  height: 100%;
   flex: none;
   display: flex;
   flex-direction: column;
   min-height: 0;
+  position: relative;
 }
 
 // ==================== 地图区 ====================
 .db-map {
-  position: relative;
-  flex: 1;
-  min-height: 0;
-
+  // position: relative;
+  // flex: 1;
+  // min-height: 0;
+  height: 100%;
   &__three {
     position: absolute;
     inset: 0;

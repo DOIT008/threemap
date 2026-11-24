@@ -30,7 +30,7 @@ const yearCardImgs = [cardCityAll, cardCityLevel];
 .db-year {
   position: absolute;
   left: 434.5px;
-  bottom: 25px;
+  bottom: 190px;
   display: flex;
   gap: 12px;
   z-index: 2;
