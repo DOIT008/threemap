@@ -52,13 +52,41 @@ function deepMerge(base: any, patch: any): any {
 }
 
 /**
+ * 主题里的相机方向可以写「方位角 + 俯仰角」，比 x/y/z 好读。
+ * 这里把它换算成方向向量写回 x/y/z，并删掉角度字段：
+ * 角度只是书写方式，留着会和面板改出来的 x/y/z 打架（两者同时存在时分不清谁生效）。
+ * 只写其中一个角度时，另一个按现有的 x/y/z 反算，所以「只调俯仰角」也能用。
+ */
+function resolveCameraAngles(camera: ThreeMapOptions["camera"]): void {
+  const { azimuth, elevation } = camera;
+  if (azimuth === undefined && elevation === undefined) return;
+
+  const az = azimuth ?? (Math.atan2(camera.x, camera.z) * 180) / Math.PI;
+  const el = elevation ?? (Math.atan2(camera.y, Math.hypot(camera.x, camera.z)) * 180) / Math.PI;
+
+  // 夹掉 90°，否则水平分量归零、方位角会失去意义
+  const azRad = (az * Math.PI) / 180;
+  const elRad = (Math.min(89.9, Math.max(0.1, el)) * Math.PI) / 180;
+  const horizontal = Math.cos(elRad);
+
+  // 长度无所谓，setCamera 会归一化后按地图宽重新算距离
+  camera.x = Math.sin(azRad) * horizontal;
+  camera.y = Math.sin(elRad);
+  camera.z = Math.cos(azRad) * horizontal;
+  delete camera.azimuth;
+  delete camera.elevation;
+}
+
+/**
  * 把主题合并到一份完整默认配置上。
  * @param base 默认配置（createDefaultOptions() 的产物，调用方保证是全新对象）
  * @param theme 面板导出的主题，允许为 null
  */
 export function mergeOptions(base: ThreeMapOptions, theme?: ThreeMapTheme | null): ThreeMapOptions {
   if (!theme) return base;
-  return deepMerge(base, theme) as ThreeMapOptions;
+  const options = deepMerge(base, theme) as ThreeMapOptions;
+  resolveCameraAngles(options.camera);
+  return options;
 }
 
 /** 递归剔除函数值（formatter 之类没法序列化，导出也没意义） */
@@ -76,12 +104,25 @@ function stripFunctions<T>(value: T): T {
 }
 
 /**
+ * 把方向向量换成面板同款的角度（方位角 / 俯仰角，单位度）。
+ * 导出时保留一位小数：面板是整数调参，但向量回算会有零头，留着不丢精度。
+ */
+function toCameraAngles(camera: ThreeMapOptions["camera"]): NonNullable<ThreeMapTheme["camera"]> {
+  const azimuth = ((Math.atan2(camera.x, camera.z) * 180) / Math.PI + 360) % 360;
+  const elevation = (Math.atan2(camera.y, Math.hypot(camera.x, camera.z)) * 180) / Math.PI;
+  const round = (value: number) => Math.round(value * 10) / 10;
+  return { azimuth: round(azimuth), elevation: round(elevation) };
+}
+
+/**
  * 从完整 options 抽出可固化的主题。
  * 不含 data / series 的业务数据，也不含任何函数。
  */
 export function extractTheme(options: ThreeMapOptions): ThreeMapTheme {
   // data 置空后会被 stripFunctions 丢掉，等价于「不导出业务数据」
   const theme = stripFunctions({ ...options, data: undefined }) as ThreeMapTheme;
+  // 相机方向导出成人能读的角度（面板也是按角度调的），回填时由 resolveCameraAngles 换算回 x/y/z
+  theme.camera = toCameraAngles(options.camera);
   // 系列本身留着（样式有用），但把每条 series 的 data 清空
   const series = options.series;
   if (series && series.length) {

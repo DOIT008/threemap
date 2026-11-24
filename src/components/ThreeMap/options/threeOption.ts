@@ -40,6 +40,7 @@ const createDefaultOptions = (): ThreeMapOptions => {
       autoScaleFactor: 1, // 自动缩放的额外系数（1 = 原始大小）
       scale: 100, // 自动缩放关闭时的投影缩放比例
       depth: 53, // 区域厚度（千分比：53 = 地图宽度的 5.3%，与 demo 的 1.6/30.018 等价）
+      mapSize: 1, // 地图尺寸倍率：1 = 默认构图，>1 地图更大（相机拉近）
     },
     // ========== 画布背景配置 ==========
     background: {
@@ -240,6 +241,7 @@ const createDefaultOptions = (): ThreeMapOptions => {
     // ========== 场景特效开关 ==========
     scene: {
       groundRing: true, // 地面光圈
+      groundRingScale: 1, // 地面光圈缩放：圆环底图 = 地图宽 × 1.066 × 该值，独立于地图尺寸
       beams: true, // 漂浮光柱
       cones: true, // 区县标点（光锥 + 光环）
       trail: true, // 边缘流光（沿外轮廓循环跑的一道光）

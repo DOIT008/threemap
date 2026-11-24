@@ -170,6 +170,8 @@ export interface MapConfig {
   autoScaleFactor: number;
   scale: number;
   depth: number;
+  /** 地图在画面里的尺寸倍率：1 = 默认，>1 更大（等价于把相机拉近） */
+  mapSize: number;
 }
 
 export interface TooltipItemStyle {
@@ -225,6 +227,13 @@ export interface ThreeMapOptions {
     autoRotateSpeed: number;
   };
   camera: {
+    /**
+     * 方位角（度）：0 = 从正前方（+Z）看，90 = 从右侧（+X）看。
+     * 只在主题里写角度时用，合并进 options 后会被换算成 x/y/z 并删掉。
+     */
+    azimuth?: number;
+    /** 俯仰角（度）：90 = 正俯视，越小越接近平视。同上，仅主题可写 */
+    elevation?: number;
     x: number;
     y: number;
     z: number;
@@ -267,6 +276,8 @@ export interface ThreeMapOptions {
   scene: {
     /** 地面光圈 */
     groundRing: boolean;
+    /** 地面光圈的缩放倍率：圆环底图尺寸 = 地图宽 × 1.066 × 该值，与地图尺寸互不影响 */
+    groundRingScale: number;
     /** 漂浮光柱 */
     beams: boolean;
     /** 区县标点（光锥 + 光环） */

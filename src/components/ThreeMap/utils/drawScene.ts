@@ -19,9 +19,12 @@ export interface SceneLayer {
 /**
  * 地面光圈：一张大贴图贴在地图下方，缓慢自转。
  * 它是「悬浮在星空里」的视觉基底，也是镜面反射之外唯一的地面装饰。
+ *
+ * @param scale 圆环自己的缩放倍率（独立于地图尺寸）：1 就是 demo 的 1.066 倍地图宽，
+ *              调大后光圈会撑到地图之外，当纯粹的背景装饰用
  */
-export function drawGroundRing(mapWidth: number): SceneLayer {
-  const size = mapWidth * 1.066; // demo: 16 / 15（地图世界宽）
+export function drawGroundRing(mapWidth: number, scale = 1): SceneLayer {
+  const size = mapWidth * 1.066 * Math.max(0.1, scale); // demo: 16 / 15（地图世界宽）
   const geometry = new THREE.PlaneGeometry(size, size);
   const material = new THREE.MeshBasicMaterial({
     transparent: true,

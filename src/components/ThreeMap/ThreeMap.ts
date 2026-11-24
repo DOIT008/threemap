@@ -151,6 +151,8 @@ export default class ThreeMap {
   trailLayer: SceneLayer | null;
   /** 场景图元（标点/跑光）的开关快照，变化时才重建 */
   lastSceneToggleKey: string;
+  /** 机位（观测角度 + 地图尺寸）快照，只有真变了才重设相机 */
+  lastCameraKey: string;
   /** 入场动画开关快照 */
   lastIntroKey: string;
   lastSceneKey: string;
@@ -234,6 +236,7 @@ export default class ThreeMap {
     this.conesLayer = null;
     this.trailLayer = null;
     this.lastSceneToggleKey = "";
+    this.lastCameraKey = "";
     this.lastIntroKey = "";
     this.lastSceneKey = "";
     this.mapDepth = 0;
@@ -318,6 +321,7 @@ export default class ThreeMap {
       this.options = options;
       updateDistrictMaterials.call(this as any, options.data, options);
       this.updateOutlineLayers(options);
+      this.applyCamera(options);
       this.setBackground(options);
       this.updateEnvironment(options);
       this.updateSceneLayers(options);
@@ -404,11 +408,8 @@ export default class ThreeMap {
       const offsetZ = box ? (box.minY * 2 + box.height) / 2 : 0;
       this.seriesGroup.position.set(offsetX, this.mapWorldWidth * 0.01266, offsetZ);
 
-      // ---- 相机：与 demo 同构图（距离 = 0.7675 × 地图宽，方向取 options.camera）----
-      this.setCamera(options.camera.x, options.camera.y, options.camera.z);
-      // 线宽补偿基准：demo 里机位距离 11.52 配 refDistance 14，
-      // 这里跟着实际机位走，换机位线宽观感才不会突然变粗变细
-      this.refDistance = this.camera!.position.length() * 1.2153;
+      // ---- 相机：方向取 options.camera（观测角度），距离再按 config.mapSize 缩放 ----
+      this.applyCamera(options, true);
       this.isInitCamera = true;
 
       // ---- 背景与雾：可画底色，也可以整体透明让页面背景透出来 ----
@@ -418,7 +419,7 @@ export default class ThreeMap {
       this.setEnvironment(options);
       this.setFoundation(options);
       // 背景开关也参与 key：透明背景要把镜面从「深色底板」换成按倒影亮度取透明
-      this.lastSceneKey = `${options.background.show}|${options.mirror.show}|${options.scene.groundRing}|${options.scene.beams}|${options.glow.show}|${options.grid.show}|${options.foundation.show}`;
+      this.lastSceneKey = `${options.background.show}|${options.mirror.show}|${options.scene.groundRing}|${options.scene.groundRingScale}|${options.scene.beams}|${options.glow.show}|${options.grid.show}|${options.foundation.show}`;
 
       this.drawDistrictArea(options.data, full.features, options);
       this.drawDistrictOutline(boundary.features, options);
@@ -531,7 +532,7 @@ export default class ThreeMap {
   updateEnvironment(options: ThreeMapOptions): void {
     if (!this.environmentGroup) return;
 
-    const key = `${options.background.show}|${options.mirror.show}|${options.scene.groundRing}|${options.scene.beams}|${options.glow.show}|${options.grid.show}|${options.foundation.show}`;
+    const key = `${options.background.show}|${options.mirror.show}|${options.scene.groundRing}|${options.scene.groundRingScale}|${options.scene.beams}|${options.glow.show}|${options.grid.show}|${options.foundation.show}`;
     if (this.lastSceneKey === key) return;
     this.lastSceneKey = key;
 
@@ -757,7 +758,7 @@ export default class ThreeMap {
     const width = this.mapWorldWidth;
 
     if (options.scene.groundRing) {
-      const ring = drawGroundRing(width);
+      const ring = drawGroundRing(width, options.scene.groundRingScale);
       this.environmentGroup.add(ring.object);
       this.sceneLayers.push(ring);
     }
@@ -1182,16 +1183,45 @@ export default class ThreeMap {
   }
 
   /**
+   * 应用机位：方向取 options.camera（就是观测角度），
+   * 距离 = 地图宽 × CAMERA_DISTANCE_RATIO ÷ config.mapSize。
+   *
+   * 机位一变，飞线/跑光的线宽补偿基准也要跟着变，否则放大后线会被拉粗、缩小后细到看不见。
+   * @param force 强制重设（换地图后地图宽变了，即使配置没动也得重算）
+   */
+  applyCamera(options: ThreeMapOptions, force = false): void {
+    const key = `${options.camera.x}|${options.camera.y}|${options.camera.z}|${options.config.mapSize}`;
+    if (!force && key === this.lastCameraKey) return;
+    this.lastCameraKey = key;
+
+    this.setCamera(options.camera.x, options.camera.y, options.camera.z, options.config.mapSize);
+    if (!this.camera) return;
+
+    const prevRefDistance = this.refDistance;
+    this.refDistance = this.camera.position.length() * 1.2153;
+    if (this.refDistance === prevRefDistance) return;
+
+    // 已建好的飞线/跑光材质把基准量抬在 uniform 里，得一起刷新
+    this.scene?.traverse((obj: any) => {
+      const uniforms = obj.material?.uniforms;
+      if (uniforms?.uRefDistance) uniforms.uRefDistance.value = this.refDistance;
+    });
+  }
+
+  /**
    * 设置相机位置。
    *
-   * options.camera 只当方向用：真正的距离由地图宽度决定（demo: 11.52 / 15.009 = 0.7675）。
-   * 这样换地图、换容器，构图永远是「地图占满画面中心」的同一个视角。
+   * options.camera 只当方向用：真正的距离由地图宽度决定（demo: 11.52 / 15.009 = 0.7675），
+   * 再除上 mapSize（面板里的「地图尺寸」）做整体缩放。
+   * 这样换地图、换容器，构图永远是同一个视角，尺寸只跟着 mapSize 走。
    */
-  setCamera(x: number, y: number, z: number): void {
+  setCamera(x: number, y: number, z: number, mapSize = 1): void {
     if (!this.camera) return;
     const dir = new THREE.Vector3(x, y, z);
     if (dir.lengthSq() < 1e-6) dir.set(0.1, 0.9, 0.45);
-    dir.normalize().multiplyScalar(this.mapWorldWidth * CAMERA_DISTANCE_RATIO);
+    // mapSize 夹在 0.4~2.5：太小相机贴到地图里，太大地图缩成一个点
+    const size = Math.min(2.5, Math.max(0.4, mapSize || 1));
+    dir.normalize().multiplyScalar((this.mapWorldWidth * CAMERA_DISTANCE_RATIO) / size);
     this.camera.position.copy(dir);
     this.camera.lookAt(0, 0, 0);
   }

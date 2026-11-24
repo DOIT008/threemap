@@ -11,7 +11,8 @@ const mapTheme: ThreeMapTheme = {
     disableZoom: false,
     autoScaleFactor: 1,
     scale: 100,
-    depth: 36
+    depth: 36,
+    mapSize: 0.7
   },
   background: {
     show: false,
@@ -22,9 +23,8 @@ const mapTheme: ThreeMapTheme = {
     autoRotateSpeed: 2
   },
   camera: {
-    x: -0.8,
-    y: 10.2,
-    z: 5.3
+    azimuth: 0,
+    elevation: 60.3
   },
   grid: {
     show: false,
@@ -211,6 +211,7 @@ const mapTheme: ThreeMapTheme = {
   },
   scene: {
     groundRing: true,
+    groundRingScale: 1,
     beams: true,
     cones: false,
     trail: true,

@@ -230,8 +230,8 @@ import myTheme from "@/components/ThreeMap/options/myTheme";
 import type { ThreeMapTheme } from "@/components/ThreeMap/options/theme";
 
 const myTheme: ThreeMapTheme = {
-  config: { depth: 40 },
-  camera: { x: -0.5, y: 11, z: 6 },
+  config: { depth: 40, mapSize: 1.1 },
+  camera: { azimuth: 355, elevation: 62 },
   surface: { normalMap: false, centerDark: 0.5 },
   side: { topColor: "#8fd8ff" },
   scene: { beams: false },
@@ -321,8 +321,12 @@ config: {
   depth: 35,              // 地图拉伸厚度（Three.js 单位）
   disableRotate: false,   // 禁用轨道旋转
   disableZoom: false,     // 禁用缩放
+  mapSize: 1,             // 地图在画面里的尺寸倍率：1 = 默认，>1 更大（等价于把相机拉近）
 }
 ```
+
+`mapSize` 和 `autoScaleFactor` 不是一回事：后者改的是投影比例，而相机距离是按地图宽换算的，
+两者同比放大在画面上互相抵消，观感几乎不变；想真正改「地图在画面里的大小」用 `mapSize`。
 
 ---
 
@@ -342,15 +346,32 @@ background: {
 
 ---
 
-### camera — 相机位置
+### camera — 相机位置（观测角度）
+
+主题里直接写角度，和调参台「视角与尺寸」面板上的两个输入框一致：
 
 ```ts
 camera: {
-  x: 0.8,   // 初始相机 X 坐标
-  y: 6,     // 初始相机 Y 坐标（高度）
-  z: 3,     // 初始相机 Z 坐标（前后）
+  azimuth: 351.4,   // 方位角：0 = 从正前方（+Z）看，90 = 从右侧（+X）看
+  elevation: 62.3,  // 俯仰角：90 = 正俯视，越小越接近平视
 }
 ```
+
+也可以继续写方向向量的老格式（两种写法二选一，同时存在时角度优先）：
+
+```ts
+camera: {
+  x: -0.8,  // 只当方向用：与 y、z 一起决定观测角度
+  y: 10.2,  // 越高越偏俯视
+  z: 5.3,   // 正值从画面正前方看
+}
+```
+
+这几个数只表示方向，长度不重要：真实机位距离固定为「地图宽 × 0.7675 ÷ config.mapSize」。
+角度写法会在合并主题时换算成 x/y/z（`mergeOptions()` 里的 `resolveCameraAngles()`），
+所以运行时只有一套数据，面板改出来的值不会被主题里的角度覆盖；反方向，「导出配置」
+输出的是角度而不是 x/y/z，导出文件更好读。
+俯仰角超过约 88° 会被轨道控制器的 `maxPolarAngle` 回弹，实际可用范围约 22°~88°。
 
 ---
 
@@ -557,6 +578,7 @@ emphasis: {
 ```ts
 scene: {
   groundRing: true,        // 地面光圈（图片贴片，缓慢自转）
+  groundRingScale: 1,      // 地面光圈自己的缩放：1 = 约 1.07 倍地图宽，与地图尺寸互不影响
   beams: true,             // 漂浮光柱
   cones: true,             // 区县标点（光锥 + 光环）
   trail: true,             // 边缘流光：沿城市外轮廓循环跑的一道光

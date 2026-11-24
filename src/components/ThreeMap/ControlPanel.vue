@@ -25,6 +25,7 @@ const rangePanelOpen = ref(false);
 const surfacePanelOpen = ref(false);
 const sidePanelOpen = ref(false);
 const scenePanelOpen = ref(false);
+const viewPanelOpen = ref(false);
 const newSeriesType = ref<SeriesType>("marker");
 
 const lineColorHex = computed({
@@ -144,6 +145,43 @@ function removeSeries(index: number): void {
 
 function regenerateSeriesData(index: number): void {
   emit("regenerate-series", index);
+}
+
+/**
+ * 机位面板：options.camera 存的是方向向量，面板上换成更好理解的观测角度。
+ * 方位角 0° = 从正前方（+Z）看，俯仰角 90° = 正俯视。
+ * 俯仰角受轨道控制器 maxPolarAngle 限制（约 21°~90°），这里夹到 22°~88° 防止被回弹。
+ */
+const CAMERA_ELEVATION_RANGE: [number, number] = [22, 88];
+
+const cameraAngles = computed(() => {
+  const { x, y, z } = props.options.camera;
+  return {
+    azimuth: ((Math.atan2(x, z) * 180) / Math.PI + 360) % 360,
+    elevation: (Math.atan2(y, Math.hypot(x, z)) * 180) / Math.PI,
+  };
+});
+
+const cameraAzimuth = computed(() => Math.round(cameraAngles.value.azimuth));
+const cameraElevation = computed(() => Math.round(cameraAngles.value.elevation));
+
+/** 把面板上的角度反算回 direction 向量：长度无所谓，setCamera 会归一化 */
+function onCameraAngleChange(kind: "azimuth" | "elevation", event: Event): void {
+  const value = Number((event.target as HTMLInputElement).value);
+  if (!Number.isFinite(value)) return;
+
+  const [minElevation, maxElevation] = CAMERA_ELEVATION_RANGE;
+  const azimuth = kind === "azimuth" ? value : cameraAngles.value.azimuth;
+  const rawElevation = kind === "elevation" ? value : cameraAngles.value.elevation;
+  const elevation = Math.min(maxElevation, Math.max(minElevation, rawElevation));
+
+  const az = (azimuth * Math.PI) / 180;
+  const el = (elevation * Math.PI) / 180;
+  const cosEl = Math.cos(el);
+  props.options.camera.x = Math.sin(az) * cosEl;
+  props.options.camera.y = Math.sin(el);
+  props.options.camera.z = Math.cos(az) * cosEl;
+  emitApply();
 }
 
 function updateRangeColor(index: 0 | 1, hex: string): void {
@@ -494,6 +532,54 @@ function updateColorByHex(target: "topColor" | "sideColor" | "uColor" | "outLine
       </div>
 
       <div class="panel-group">
+        <button class="panel-group-header" @click="viewPanelOpen = !viewPanelOpen">
+          <span>视角与尺寸</span>
+          <span>{{ viewPanelOpen ? "-" : "+" }}</span>
+        </button>
+        <div v-if="viewPanelOpen" class="panel-group-body">
+          <div class="panel-item">
+            <span class="panel-label">方位角:</span>
+            <input
+              class="number-input"
+              type="number"
+              min="0"
+              max="360"
+              step="1"
+              title="绕竖轴转：0° 从正前方看，90° 从右侧看"
+              :value="cameraAzimuth"
+              @change="onCameraAngleChange('azimuth', $event)"
+            />
+          </div>
+          <div class="panel-item">
+            <span class="panel-label">俯仰角:</span>
+            <input
+              class="number-input"
+              type="number"
+              min="22"
+              max="88"
+              step="1"
+              title="22° 接近平视，88° 接近正俯视（受轨道控制器 maxPolarAngle 限制）"
+              :value="cameraElevation"
+              @change="onCameraAngleChange('elevation', $event)"
+            />
+          </div>
+          <div class="panel-item">
+            <span class="panel-label">地图尺寸:</span>
+            <input
+              class="number-input"
+              type="number"
+              min="0.4"
+              max="2.5"
+              step="0.05"
+              title="地图在画面里的缩放倍率：1 为默认，越大越近"
+              v-model.number="props.options.config.mapSize"
+              @change="emitApply"
+            />
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-group">
         <button class="panel-group-header" @click="scenePanelOpen = !scenePanelOpen">
           <span>场景特效</span>
           <span>{{ scenePanelOpen ? "-" : "+" }}</span>
@@ -502,6 +588,20 @@ function updateColorByHex(target: "topColor" | "sideColor" | "uColor" | "outLine
           <div class="panel-item toggle">
             <span class="panel-label">地面光圈:</span>
             <input type="checkbox" v-model="props.options.scene.groundRing" @change="emitApply" />
+          </div>
+          <div class="panel-item" :class="{ 'is-disabled': !props.options.scene.groundRing }">
+            <span class="panel-label">光圈缩放:</span>
+            <input
+              class="number-input"
+              type="number"
+              min="0.3"
+              max="3"
+              step="0.05"
+              title="装饰圆环底图的独立缩放：1 = 默认（约 1.07 倍地图宽），与地图尺寸互不影响"
+              :disabled="!props.options.scene.groundRing"
+              v-model.number="props.options.scene.groundRingScale"
+              @change="emitApply"
+            />
           </div>
           <div class="panel-item toggle">
             <span class="panel-label">漂浮光柱:</span>
