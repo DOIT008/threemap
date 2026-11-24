@@ -38,12 +38,22 @@ function format(n: number, p: Parsed): string {
  * 数字滚动：把 "2,396,047" / "98.28%" / "4832.6万" 这类字符串
  * 从 0 缓动到目标值，保留原有千分位 / 小数位 / 后缀格式。
  * 非数值（如 "-"）原样返回。source 变化时重新滚动（用于 tab 切换）。
+ *
+ * ready 传入时（大屏入场信号），挂载后先按住不滚，
+ * 等它置 true 再一起从 0 滚上来；不传则挂载即滚（单独调试面板时就是这个行为）。
  */
-export function useCountUp(source: () => string, duration = 1400): Ref<string> {
+export function useCountUp(
+  source: () => string,
+  duration = 1400,
+  ready?: Ref<boolean>,
+): Ref<string> {
   const initial = source();
   const parsed = parse(initial);
   const display = ref(parsed ? format(0, parsed) : initial);
   let raf = 0;
+
+  // 初始值已经算成 0 了，这时候不滚就是停在 0，不会先闪一下真实值
+  const held = (): boolean => ready !== undefined && !ready.value;
 
   function animateTo(raw: string): void {
     cancelAnimationFrame(raf);
@@ -62,8 +72,18 @@ export function useCountUp(source: () => string, duration = 1400): Ref<string> {
     raf = requestAnimationFrame(step);
   }
 
-  onMounted(() => animateTo(source()));
-  watch(source, (v) => animateTo(v));
+  onMounted(() => {
+    if (!held()) animateTo(source());
+  });
+  watch(source, (v) => {
+    if (!held()) animateTo(v);
+  });
+  // 入场信号亮起来：把藏着没滚的数字补滚一次
+  if (ready !== undefined) {
+    watch(ready, (ok) => {
+      if (ok) animateTo(source());
+    });
+  }
   onBeforeUnmount(() => cancelAnimationFrame(raf));
   return display;
 }

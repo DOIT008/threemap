@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { onBeforeUnmount, onMounted, provide, ref } from "vue";
 import { useRouter } from "vue-router";
 import ThreeMap from "@/components/ThreeMap/index.vue";
 import PanelVolume from "./dashboard/PanelVolume.vue";
@@ -15,14 +15,16 @@ import DbHeader from "./dashboard/DbHeader.vue";
 import DbKpiBar from "./dashboard/DbKpiBar.vue";
 import DbYearCards from "./dashboard/DbYearCards.vue";
 import DbMapMarkers from "./dashboard/DbMapMarkers.vue";
-import { STAGE } from "./dashboard/constants";
+import { DB_REVEAL, STAGE } from "./dashboard/constants";
 import dashboardTheme from "@/themes/dashboard";
 
 // ==================== 第二阶段进场 ====================
-// 两侧面板 + 底部电子证照要等地图完全长出来（ThreeMap 的 intro-end）再移入，
-// 不然面板先于地图出现，主次就乱了
+// 两侧面板 + 顶部 KPI 条 + 地图内年度卡片 + 底部电子证照，都要等地图完全长出来
+// （ThreeMap 的 intro-end）再移入，不然面板先于地图出现，主次就乱了
 const panelsIn = ref(false);
 let panelsFallback = 0;
+// 面板里的 CountValue 注入这个信号：数字等入场了再一起从 0 滚上来
+provide(DB_REVEAL, panelsIn);
 
 // ==================== 退出大屏 ====================
 const router = useRouter();
@@ -88,7 +90,9 @@ onBeforeUnmount(() => {
 
         <!-- 中列：KPI 条 + 郑州 3D 地图 + 本年办件量卡片 + 电子证照 -->
         <div class="db-center">
-          <div class="db-slot" style="animation-delay: 0.1s"><DbKpiBar /></div>
+          <div class="db-slot db-slot--edge db-slot--top" :class="{ 'is-in': panelsIn }">
+            <DbKpiBar />
+          </div>
 
           <div class="db-map">
             <div class="db-map__three">
@@ -102,7 +106,7 @@ onBeforeUnmount(() => {
               />
             </div>
             <!-- <DbMapMarkers /> -->
-            <DbYearCards />
+            <DbYearCards :active="panelsIn" />
           </div>
 
           <div class="db-slot db-slot--edge db-slot--bottom" :class="{ 'is-in': panelsIn }" style="--in-delay: 0.32s">
@@ -198,31 +202,26 @@ onBeforeUnmount(() => {
 }
 
 // ==================== 面板入场 ====================
-// 中列 KPI 条属于地图那块，页面一进来就淡入
+// 中列的内容（KPI 条、年度卡片、电子证照）和两侧面板全部走 --edge 这套：
+// 默认藏着，等 panelsIn 置 true 后按 --in-delay 逐块移入
 .db-slot {
-  animation: db-in 0.7s cubic-bezier(0.22, 0.8, 0.3, 1) both;
+  position: relative;
 }
 
-@keyframes db-in {
-  from {
-    opacity: 0;
-    transform: translateY(18px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-// 两侧面板 + 底部电子证照：先藏着，等地图完全长出来再从画面外侧移入。
-// 左列从左边推、右列从右边推、底部从下方托上来；--in-delay 控制逐块错开的节奏。
+// 两侧面板 + 顶部 KPI 条 + 底部电子证照：先藏着，等地图完全长出来再从画面外侧移入。
+// 左列从左边推、右列从右边推、KPI 条从上方落、底部从下方托上来；
+// --in-delay 控制逐块错开的节奏。
 .db-slot--edge {
   opacity: 0;
-  animation: none;
   will-change: transform, opacity;
   transition:
     opacity 0.5s ease var(--in-delay, 0s),
     transform 0.68s cubic-bezier(0.22, 0.8, 0.3, 1) var(--in-delay, 0s);
+}
+
+.db-slot--top {
+  // 幅度压小，不然起始位置会叠到 header 上
+  transform: translateY(-12px);
 }
 
 .db-slot--left {

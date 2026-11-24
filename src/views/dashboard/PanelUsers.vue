@@ -233,7 +233,7 @@ const ICON_SETS = [
       position: absolute;
       inset: 0;
       border-radius: inherit;
-      padding: 1px;
+      padding: 0.5px 1px 1px 1px;
       background: linear-gradient(90deg, rgba(255, 110, 35, 0) 0%, rgba(255, 110, 35, 1) 100%);
       -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
       -webkit-mask-composite: xor;

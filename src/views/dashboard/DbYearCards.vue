@@ -6,10 +6,13 @@ import dashboard from "@/data/dashboard.json";
 
 const yearTotals = dashboard.yearTotals;
 const yearCardImgs = [cardCityAll, cardCityLevel];
+
+// active 由 DashboardView 在地图完全出场（panelsIn）后置 true，卡片随之托上来
+const props = withDefaults(defineProps<{ active?: boolean }>(), { active: false });
 </script>
 
 <template>
-  <div class="db-year">
+  <div class="db-year" :class="{ 'is-in': props.active }">
     <div
       v-for="(card, i) in yearTotals"
       :key="card.label"
@@ -35,6 +38,17 @@ const yearCardImgs = [cardCityAll, cardCityLevel];
   gap: 12px;
   z-index: 2;
   pointer-events: none;
+  // 跟两侧面板同一套入场：默认藏着，等地图完全长出来再从下方轻轻托起（最晚一块收尾）
+  opacity: 0;
+  transform: translateY(26px);
+  transition:
+    opacity 0.5s ease 0.36s,
+    transform 0.68s cubic-bezier(0.22, 0.8, 0.3, 1) 0.36s;
+
+  &.is-in {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .db-year-card {
