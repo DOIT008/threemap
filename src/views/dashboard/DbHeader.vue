@@ -8,12 +8,18 @@ const header = dashboard.header;
 // ==================== 顶部实时时间 ====================
 const now = ref(new Date());
 let timer: ReturnType<typeof setInterval> | undefined;
+let aligner: ReturnType<typeof setTimeout> | undefined;
 onMounted(() => {
-  timer = setInterval(() => {
+  // 先等到下一个整秒再开始每秒跳，跟真实时钟对齐（否则秒数是半秒一跳、看着发飘）
+  aligner = setTimeout(() => {
     now.value = new Date();
-  }, 1000);
+    timer = setInterval(() => {
+      now.value = new Date();
+    }, 1000);
+  }, 1000 - (Date.now() % 1000));
 });
 onBeforeUnmount(() => {
+  if (aligner !== undefined) clearTimeout(aligner);
   if (timer !== undefined) clearInterval(timer);
 });
 
@@ -57,12 +63,14 @@ const WEEKS = ["日", "一", "二", "三", "四", "五", "六"];
 function pad(n: number): string {
   return String(n).padStart(2, "0");
 }
-const timeText = computed(() => {
+// 拆成几段分别渲染：日期 / 星期 / 时:分:秒，秒单独走一个 computed，每秒刷新一次
+const dateText = computed(() => {
   const d = now.value;
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} 星期${
-    WEEKS[d.getDay()]
-  } ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 });
+const weekText = computed(() => `星期${WEEKS[now.value.getDay()]}`);
+const clockText = computed(() => `${pad(now.value.getHours())}:${pad(now.value.getMinutes())}:`);
+const secondText = computed(() => pad(now.value.getSeconds()));
 </script>
 
 <template>
@@ -85,11 +93,25 @@ const timeText = computed(() => {
       </g>
     </svg>
     <span class="db-header__org">{{ header.org }} • {{ header.updateText }}</span>
-    <span class="db-header__time">{{ timeText }}</span>
+    <span class="db-header__time">
+      <span>{{ dateText }}</span>
+      <span>{{ weekText }}</span>
+      <span>{{ clockText }}{{ secondText }}</span>
+    </span>
   </header>
 </template>
 
 <style scoped lang="scss">
+// 数码管字体（LCDM2B）：只接管数字、短横和冒号，
+// 中文「星期X」继续走后面的中文字体兜底；字体放在 public 下，路径不受构建/相对解析影响
+@font-face {
+  font-family: "LCDMono2";
+  src: url("/fonts/LCDM2B-9.ttf") format("truetype");
+  // font-weight: 700;
+  font-display: swap;
+  unicode-range: U+002D, U+0030-003A;
+}
+
 .db-header {
   position: relative;
   height: 91px;
@@ -167,10 +189,16 @@ const timeText = computed(() => {
     position: absolute;
     right: 50px;
     top: 28px;
-    font-family: LCDMono2, Consolas, monospace;
+    // 日期 / 星期 / 时:分:秒 分开成几段，用 gap 顶替原来字符串里的空格
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-family: "LCDMono2", "Microsoft YaHei", Consolas, monospace;
     font-size: 20px;
-    font-weight: 700;
+    // font-weight: 700;
     line-height: 21px;
+    // 数码管字形本身自带字宽，去掉合成加粗避免糊在一起
+    font-synthesis: none;
     color: rgba(230, 247, 255, 1);
     letter-spacing: 1px;
     text-shadow: 0 0 10px rgba(80, 180, 255, 0.45);
