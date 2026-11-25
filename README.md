@@ -114,13 +114,6 @@ git remote rename origin upstream
 git remote add origin <业务仓库地址>
 ```
 
-如果你已经 clone 过但工作区是空的，不用重来，执行：
-
-```sh
-git switch -c dev origin/dev
-# 若已把 origin 改名为 upstream：git switch -c dev upstream/dev
-```
-
 如果你本地已经 clone 过那个空仓库，也可以反过来把模板灌进来：
 
 ```sh
