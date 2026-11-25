@@ -671,6 +671,7 @@ data: [
   },
   // ...
 ]
+
 ```
 
 | 字段       | 类型                             | 说明                          |
@@ -679,6 +680,8 @@ data: [
 | `name`     | `string`                         | 区域名称                      |
 | `value`    | `number`                         | 数值，参与色阶映射            |
 | `color`    | `string \| null`                 | 直接指定颜色，覆盖 range 映射 |
+
+郑州市数据请参考`src/data/410100-districts.json`
 
 ---
 
@@ -856,6 +859,286 @@ map.setOption({
 内置的 GeoJSON 文件位于 `src/assets/geoJson/`，以省级 adcode 命名（如 `110000.json` = 北京）。`100000.json` 为中国全图，`100000_bound.json` 为国界边界。
 
 ---
+## 导出配置
+
+```ts
+import type { ThreeMapTheme } from "@/components/ThreeMap/options/theme";
+
+/**
+ * 由控制面板导出的地图主题。
+ * 用法：<ThreeMap :option="mapTheme" :panel="false" />
+ */
+const mapTheme: ThreeMapTheme = {
+  // ========== 基础配置：自适应、交互开关、厚度与构图 ==========
+  config: {
+    autoScale: true, // 是否按容器尺寸自动计算投影缩放比例
+    disableRotate: false, // 是否禁用鼠标拖拽旋转
+    disableZoom: false, // 是否禁用鼠标滚轮缩放
+    autoScaleFactor: 1, // autoScale 的投影倍率微调：1 = 原始；不直接改画面里的地图大小
+    scale: 100, // autoScale=false 时手动指定的投影缩放比例
+    depth: 53, // 挤出厚度，千分比：53 = 地图宽度的 5.3%
+    mapSize: 1 // 地图在画面里的尺寸倍率：1 = 默认，>1 更大（等价于相机拉近）
+  },
+  // ========== 画布背景：关掉时页面背景直接透出 ==========
+  background: {
+    show: false, // false = 画布透明；true = 绘制底色并启用雾
+    color: "#041533" // show=true 时的底色，同时作为雾色
+  },
+  // ========== 相机自动旋转 ==========
+  autoRotate: {
+    autoRotate: false, // 是否开启相机自动旋转
+    autoRotateSpeed: 2 // 旋转速度（度/秒）
+  },
+  // ========== 相机视角：主题里写角度，合并时换算成 x/y/z ==========
+  camera: {
+    azimuth: 351.4, // 方位角（度）：0 = 从 +Z 正面看，90 = 从 +X 右侧看
+    elevation: 62.3 // 俯仰角（度）：90 = 正俯视，越小越接近平视；合并时换算回方向向量
+  },
+  // ========== 调试网格：一般保持关闭 ==========
+  grid: {
+    show: false, // 是否显示坐标网格（调试用）
+    color: "#2BD9FF", // 网格线颜色
+    opacity: 0.2 // 网格线透明度
+  },
+  // ========== 底座圆盘与旋转动画 ==========
+  foundation: {
+    show: false, // 是否显示底座
+    size: 800, // 底盘尺寸
+    speed: 0.5, // 旋转速度（isRotate=true 时生效）
+    image: "default", // 贴图路径，'default' 使用内置图片
+    isRotate: true, // 是否启用旋转动画
+    static: false // true = 静止显示
+  },
+  // ========== 悬停提示框 ==========
+  tooltip: {
+    show: true, // 是否启用 tooltip
+    content: "", // 静态提示内容，优先级低于 formatter / formatterHtml
+    styleType: "0", // 样式类型标识，保留字段
+    isFormatter: false, // 是否启用自定义格式化
+    formatterHtml: "", // 静态 HTML，优先级最高；函数 formatter 无法序列化，导出时被剔除
+    itemStyle: {
+      backgroundColor: "rgba(8, 20, 45, 0.82)", // 半透明深蓝背景
+      borderColor: "rgba(72, 204, 255, 0.45)", // 淡蓝色边框
+      borderWidth: 0, // 边框宽度，0 = 无边框
+      padding: [
+        10, // 上
+        10, // 右
+        10, // 下
+        10 // 左
+      ],
+      color: "#DFF6FF", // 文字颜色
+      fontSize: 14, // 字号
+      minWidth: 80, // 最小宽度
+      width: "max-content", // 自适应内容宽度
+      borderRadius: 5, // 圆角
+      borderStyle: "solid" // 边框样式
+    }
+  },
+  // ========== 地面倒影：opacity 只影响倒影，不影响地图本体 ==========
+  mirror: {
+    show: true, // 是否显示镜面反射
+    color: [
+      "#020B1F", // 渐变起始色
+      "#00D2FF" // 渐变结束色
+    ],
+    opacity: 1 // 倒影浓度：1 = 最实，0 = 倒影消失
+  },
+  // ========== 电子围栏（边界墙） ==========
+  wall: {
+    show: false, // 是否显示围栏
+    height: 40, // 围栏高度
+    color: "#4DEBFF" // 围栏颜色
+  },
+  // ========== 顶面纹理贴图 ==========
+  texture: {
+    show: true, // 是否启用贴图
+    autoRepeat: false, // 是否自动计算 UV 重复次数
+    repeat: {
+      x: 0.0927, // U 方向重复次数
+      y: 0.124 // V 方向重复次数
+    },
+    offset: {
+      x: 0.5918, // U 方向偏移
+      y: 0.324 // V 方向偏移
+    },
+    image: "default" // 贴图 URL，'default' 使用内置暗底路网
+  },
+  // ========== 底图：优先级高于 props.area，换地区可删掉这两行 ==========
+  map: "410100", // 行政区划代码（410100 = 郑州）
+  mapName: "郑州", // 地图名称标识，通常随 map 一起删掉即可
+  // ========== Bloom 辉光后处理：默认关闭，开启会把亮色推白 ==========
+  glow: {
+    show: false, // 是否启用 UnrealBloom 辉光（仅对标记对象生效）
+    threshold: 0, // 亮度阈值（0~1），低于阈值的像素不发光
+    strength: 1, // 辉光强度
+    radius: 0 // 辉光扩散半径
+  },
+  // ========== 区域样式与数据映射 ==========
+  itemStyle: {
+    range: {
+      show: false, // 是否启用数据颜色映射
+      mode: "range", // 'range' = 连续渐变 | 'separate' = 分段规则
+      rules: [
+        {
+          value: 0, // 阈值：数据值 >= 0 命中此规则
+          color: "#27F4FF", // 命中后的颜色
+          label: ">=0" // 图例/提示文案
+        }
+      ], // mode='separate' 时使用；数组整体替换，不做逐项合并
+      color: [
+        "#18D7FF", // 渐变起始色（低值）
+        "#2665FF" // 渐变结束色（高值）
+      ], // mode='range' 时使用
+      min: 0, // 数据最小值，用于插值
+      max: 1000, // 数据最大值，用于插值
+      visualMap: {
+        show: false, // 是否显示色阶图例
+        left: "2%", // 图例水平位置
+        top: "2%", // 图例垂直位置
+        maxText: "高", // 最大值文案
+        minText: "低", // 最小值文案
+        textStyle: {
+          fontSize: 12, // 图例字号
+          color: "#FFF", // 图例文字颜色
+          fontStyle: "normal", // 字体风格
+          fontWeight: "normal", // 字重
+          fontFamily: "Microsoft Yahei", // 字体
+          textDecoration: "", // 文本装饰
+          textShadow: "" // 文字阴影
+        }
+      }
+    },
+    topColor: "rgba(42, 233, 255, 0.95)", // 区域顶面颜色
+    sideColor: "rgba(59, 132, 255, 0.92)", // 区域侧面颜色
+    uColor: "rgba(19, 48, 128, 1)" // 法线贴图混合色（shader 扫光 U 通道）
+  },
+  // ========== 鼠标悬停高亮：默认比常态更醒目 ==========
+  emphasis: {
+    show: true, // 是否启用 hover 高亮
+    topColor: "#73F8FF", // hover 时的顶面颜色
+    textStyle: {
+      fontSize: 15, // hover 时字号
+      color: "#FFFFFF", // hover 时文字颜色
+      fontStyle: "normal", // 字体风格
+      fontWeight: "bold", // 字重加粗
+      fontFamily: "Microsoft Yahei", // 字体
+      textDecoration: "", // 文本装饰
+      textShadow: "0 0 8px rgba(150, 220, 255, 1), 0 0 18px rgba(80, 170, 255, 0.85)" // 双层光晕
+    }
+  },
+  // ========== 边界线 ==========
+  lineStyle: {
+    color: "#78CFFF" // 区域内部边界线颜色（辉光对象）
+  },
+  outLineStyle: {
+    show: false, // 是否显示外轮廓描线；贴图自带边界光时建议关闭
+    color: "rgba(83, 198, 230, 1)" // 外轮廓线颜色
+  },
+  // ========== 区域标签 ==========
+  label: {
+    show: true, // 是否显示标签（入场动画结束后出现）
+    name: "{b}", // 标签模板：{a}=系列名，{b}=数据名称，{c}=数值，{d}=adcode
+    isFormatter: false, // 是否使用自定义 formatter / formatterHtml
+    formatter: null, // 函数无法序列化，导出时为 null；动态内容请用 isFormatter + formatterHtml
+    formatterHtml: "", // 静态 HTML，优先级高于 formatter
+    className: "", // 额外 CSS 类名
+    offset: [
+      0, // 水平偏移（像素）
+      0 // 垂直偏移（像素）
+    ],
+    itemStyle: {
+      padding: [
+        0, // 上
+        0, // 右
+        0, // 下
+        0 // 左
+      ],
+      backgroundColor: "rgba(50,50,50,0)", // 标签背景色，0 透明度 = 无底色
+      borderRadius: 5, // 圆角
+      borderColor: "rgba(255,255,255,0)", // 边框色，0 透明度 = 无边框
+      borderWidth: 0, // 边框宽度
+      textStyle: {
+        fontSize: 13, // 字号
+        color: "#d7ebff", // 淡蓝白文字
+        fontStyle: "normal", // 字体风格
+        fontWeight: "normal", // 字重
+        fontFamily: "Microsoft Yahei", // 字体
+        textDecoration: "", // 文本装饰
+        textShadow: "0 0 6px rgba(120, 190, 255, 0.9), 0 0 14px rgba(60, 130, 230, 0.6)", // 双层光晕
+        letterSpacing: "1px" // 字间距
+      }
+    }
+  },
+  // ========== 顶面材质：图片/纯色 × 法线浮雕 + 轮廓光 + 中心压暗 ==========
+  surface: {
+    mapMode: "image", // 'image' = 图片贴图 | 'color' = 纯色铺色
+    mapColor: "#0d2340", // mapMode='color' 时的铺色
+    tintColor: "#ffffff", // 图片模式染色色相，白色 = 不改色
+    tintStrength: 0, // 染色强度 0~1，0 = 原图色相
+    normalMap: true, // 是否启用法线贴图浮雕
+    edgeGlow: true, // 是否启用轮廓光带（基于贴图 alpha）
+    reliefStrength: 0.45, // 浮雕强度
+    glowLevel: 1, // 轮廓光整体倍率
+    centerDark: 0.34, // 中心压暗，让四周边缘更跳
+    mapTex: null // 自定义贴图；null = 使用内置暗底路网
+  },
+  // ========== 侧面水晶：挤出体立面，与顶面完全独立 ==========
+  side: {
+    bottomColor: "#0a2952", // 底部深蓝
+    topColor: "#6fb0d8", // 顶部亮青
+    stripeColor: "#d8f0ff", // 顶沿亮线 / 水晶条纹高光
+    stripeScale: 3.2, // 条纹密度
+    stripeStrength: 0.82, // 条纹强度
+    tintColor: "#ffffff", // 染色色相，白色 = 保持冰蓝
+    tintStrength: 0, // 染色强度 0~1
+    opacity: 1 // 侧面不透明度：1 = 实心，越小越透（底部比顶部先透）
+  },
+  // ========== 场景特效开关 ==========
+  scene: {
+    groundRing: true, // 地面光圈（图片贴片，缓慢自转）
+    groundRingScale: 1, // 光圈自身缩放：1 ≈ 1.07 倍地图宽，与 mapSize 互不影响
+    beams: true, // 漂浮光柱（只撒在城市轮廓内的薄空气层）
+    cones: true, // 区县标点（光锥 + 光环）
+    trail: true, // 边缘流光：沿城市外轮廓循环跑的一道光
+    trailSpeed: 10, // 跑完整圈所需秒数，越小越快
+    trailLength: 0.3, // 拖尾长度，占整圈的比例（0~1）
+    trailBrightness: 1, // 流光亮度倍率，1 = 默认
+    intro: true // 入场动画（相机推进 + 厚度生长 + 淡入）
+  },
+  seriesName: "map", // 主地图系列名称，一般保持默认
+  // ========== 附加系列：这里只保留样式，data 导出时被清空 ==========
+  series: [
+    {
+      type: "flight", // 图层类型：flight = 飞线
+      seriesName: "flight-1", // 系列名称，用于区分多个 series
+      points: 72, // 每条弧线的采样段数
+      flightLen: 50, // 飞行流光的长度（粒子数量），决定可见窗口大小
+      speed: 10, // 飞行速度，每帧移动的索引步长，越大越快
+      flightColor: [
+        "#5ea8f0", // 尾段颜色
+        "#e6f6ff" // 头部高光
+      ],
+      headSize: 1, // 头部粒子放大系数，用于强调飞行方向
+      data: [] // 导出时清空；自行填充 { start, end }，支持 adcode 或 [lng, lat]
+    }
+  ]
+};
+
+export default mapTheme;
+
+```
+导出配置的文件请放在`src/themes/`文件夹下，在页面中进行引用即可，例如：
+```vue
+<script setup lang="ts">
+import ThreeMap from "@/components/ThreeMap/index.vue";
+import monitorTheme from "@/themes/monitor"; //主题文件
+</script>
+
+<template>
+  <ThreeMap :option="monitorTheme" :panel="false" />
+</template>
+
+```
 
 ## 目录结构
 
