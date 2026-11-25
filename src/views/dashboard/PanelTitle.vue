@@ -108,7 +108,7 @@ defineEmits<{ enter: [] }>();
       }
 
       img {
-        transform: translateX(3px);
+        // transform: translateX(3px);
       }
     }
   }

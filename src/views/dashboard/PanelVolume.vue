@@ -14,29 +14,72 @@ function cycle(step: number): void {
 }
 
 // ==================== 环形分段 ====================
-// spec：彩色环直径 118.7（r 59.35），线宽 11
-const R = 54;
-const C = 2 * Math.PI * R;
-const GAP = 4;
+// spec：彩色环内径 48、外径 60；环外侧另有约 3.4 宽的暗色轨道（外缘半径 63.4）
+const CX = 70;
+const CY = 70;
+const R_OUT = 60;
+const R_IN = 48;
 
-const segments = computed(() => {
-  const values = current.value.list.map((it) => Number(it.value.replace(/,/g, "")));
-  const total = values.reduce((a, b) => a + b, 0) || 1;
-  let start = 0;
-  return values.map((v) => {
-    const len = (v / total) * C;
-    const seg = { dash: Math.max(len - GAP, 0.6), offset: -(start + GAP / 2) };
-    start += len;
-    return seg;
-  });
+// spec：三段弧为装饰性近等分（不按数据占比），缺口中心位于自 12 点顺时针 18° / 138° / 258°，宽 4.5°
+// 每段自暗到亮各自一条渐变：右上偏蓝、右下偏绿、左上偏青
+type GradientStop = readonly [offset: number, color: string];
+
+const ARC_DEFS: { from: number; to: number; stops: GradientStop[] }[] = [
+  { from: 20.25, to: 135.5, stops: [[0, "#1255aa"], [1, "#139afc"]] },
+  { from: 140.5, to: 255.75, stops: [[0, "#208ba2"], [0.82, "#3df6d0"], [1, "#3df6d0"]] },
+  { from: 260.25, to: 375.75, stops: [[0, "#277b9e"], [1, "#60dce4"]] },
+];
+
+const toRad = (deg: number): number => (deg * Math.PI) / 180;
+
+// 角度自 12 点顺时针计
+const polar = (degFromTop: number, r: number): { x: number; y: number } => ({
+  x: CX + r * Math.cos(toRad(degFromTop - 90)),
+  y: CY + r * Math.sin(toRad(degFromTop - 90)),
 });
 
-// spec：环内四向箭头 4.375×4.375 实心方块（rgba(108,128,151,1) + 0.47px border），位于半径 38.58 的圆周
+// 环扇形状：外弧顺时针 → 内弧逆时针，缺口处为直切
+const arcPath = (from: number, to: number): string => {
+  const o0 = polar(from, R_OUT);
+  const o1 = polar(to, R_OUT);
+  const i1 = polar(to, R_IN);
+  const i0 = polar(from, R_IN);
+  const large = to - from > 180 ? 1 : 0;
+  return (
+    `M${o0.x} ${o0.y} A${R_OUT} ${R_OUT} 0 ${large} 1 ${o1.x} ${o1.y} ` +
+    `L${i1.x} ${i1.y} A${R_IN} ${R_IN} 0 ${large} 0 ${i0.x} ${i0.y} Z`
+  );
+};
+
+const arcs = ARC_DEFS.map((arc, i) => {
+  // 渐变轴取弧中点的切线方向，保证颜色沿弧线由暗渐亮
+  const mid = toRad((arc.from + arc.to) / 2 - 90);
+  const tx = -Math.sin(mid);
+  const ty = Math.cos(mid);
+  const midR = (R_IN + R_OUT) / 2;
+  const project = (deg: number): number => {
+    const p = polar(deg, midR);
+    return (p.x - CX) * tx + (p.y - CY) * ty;
+  };
+  const s = project(arc.from);
+  const e = project(arc.to);
+  return {
+    id: `pv-arc-grad-${i}`,
+    stops: arc.stops,
+    path: arcPath(arc.from, arc.to),
+    x1: CX + s * tx,
+    y1: CY + s * ty,
+    x2: CX + e * tx,
+    y2: CY + e * ty,
+  };
+});
+
+// spec：环内四向小三角，指向圆心；底边半径 36.6、尖端半径 33.1、底宽 3.4
 const ARROWS = [
-  { dir: "up", x: 68.53, y: 28.56, step: -1 },
-  { dir: "left", x: 34.99, y: 67.14, step: -1 },
-  { dir: "right", x: 110.82, y: 67.14, step: 1 },
-  { dir: "down", x: 68.53, y: 105.06, step: 1 },
+  { dir: "up", points: "68.3,33.4 71.7,33.4 70,36.9", step: -1 },
+  { dir: "left", points: "33.4,68.3 33.4,71.7 36.9,70", step: -1 },
+  { dir: "right", points: "106.6,68.3 106.6,71.7 103.1,70", step: 1 },
+  { dir: "down", points: "68.3,106.6 71.7,106.6 70,103.1", step: 1 },
 ];
 </script>
 
@@ -60,44 +103,33 @@ const ARROWS = [
       <svg viewBox="0 0 140 140">
         <defs>
           <linearGradient
-            id="pv-ring-grad"
+            v-for="arc in arcs"
+            :id="arc.id"
+            :key="arc.id"
             gradientUnits="userSpaceOnUse"
-            x1="20"
-            y1="20"
-            x2="120"
-            y2="120"
+            :x1="arc.x1"
+            :y1="arc.y1"
+            :x2="arc.x2"
+            :y2="arc.y2"
           >
-            <stop offset="0" stop-color="#3EE6A8" />
-            <stop offset="0.5" stop-color="#31D8D8" />
-            <stop offset="1" stop-color="#008CFF" />
+            <stop
+              v-for="([offset, color], idx) in arc.stops"
+              :key="idx"
+              :offset="offset"
+              :stop-color="color"
+            />
           </linearGradient>
         </defs>
-        <circle cx="70" cy="70" r="69.5" fill="none" stroke="rgba(70,120,200,0.18)" stroke-width="1" stroke-dasharray="2 6" />
-        <circle cx="70" cy="70" :r="R" fill="none" stroke="rgba(24,52,110,0.55)" stroke-width="11" />
-        <g transform="rotate(-90 70 70)">
-          <circle
-            v-for="(seg, i) in segments"
-            :key="i"
-            cx="70"
-            cy="70"
-            :r="R"
-            fill="none"
-            stroke="url(#pv-ring-grad)"
-            stroke-width="11"
-            :stroke-dasharray="`${seg.dash} ${C}`"
-            :stroke-dashoffset="seg.offset"
-            class="pv__seg"
-          />
-        </g>
-        <!-- spec：内圈 87.5，圆心 (70.72,69.33) -->
-        <circle cx="70.72" cy="69.33" r="43.75" fill="none" stroke="rgba(70,120,200,0.28)" stroke-width="1" />
-        <rect
+        <!-- spec：环外侧暗色轨道（彩色环以外只露出约 3.4） -->
+        <circle cx="70" cy="70" r="61.7" fill="none" stroke="rgba(122,142,165,0.2)" stroke-width="3.4" />
+        <!-- spec：三段彩色弧，缺口处直切 -->
+        <path v-for="arc in arcs" :key="arc.id" :d="arc.path" :fill="`url(#${arc.id})`" />
+        <!-- spec：内圈半径 39.4，细描边 -->
+        <circle cx="70" cy="70" r="39.4" fill="none" stroke="rgba(210,215,220,0.36)" stroke-width="0.9" />
+        <polygon
           v-for="a in ARROWS"
           :key="a.dir"
-          :x="a.x"
-          :y="a.y"
-          width="4.375"
-          height="4.375"
+          :points="a.points"
           class="pv__arrow"
           @click="cycle(a.step)"
         />
@@ -129,6 +161,7 @@ const ARROWS = [
     left: 271px;
     display: flex;
     gap: 28px;
+    z-index: 100;
   }
 
   &__tab {
@@ -183,14 +216,8 @@ const ARROWS = [
     }
   }
 
-  &__seg {
-    transition: stroke-dasharray 0.8s ease, stroke-dashoffset 0.8s ease;
-  }
-
   &__arrow {
-    fill: rgba(108, 128, 151, 1);
-    stroke: rgba(208, 222, 238, 1);
-    stroke-width: 0.47;
+    fill: rgba(164, 179, 208, 1);
     cursor: pointer;
     transition: fill 0.2s ease;
 
