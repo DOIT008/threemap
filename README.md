@@ -14,62 +14,31 @@
 
 ## 目录
 
-- [ThreeMap](#threemap)
-  - [目录](#目录)
-  - [功能特性](#功能特性)
-  - [预览](#预览)
-  - [快速开始](#快速开始)
-    - [环境要求](#环境要求)
-    - [安装依赖](#安装依赖)
-    - [启动开发服务器](#启动开发服务器)
-    - [构建生产包](#构建生产包)
-  - [组件使用](#组件使用)
-    - [核心类 `ThreeMap` 所有功能都包含在该类（自定义集成）](#核心类-threemap--所有功能都包含在该类自定义集成)
-  - [调参 → 上线：主题固化](#调参--上线主题固化)
-    - [1. 在面板里调好](#1-在面板里调好)
-    - [2. 点「导出配置」](#2-点导出配置)
-    - [3. 粘进项目，关掉面板](#3-粘进项目关掉面板)
-    - [组件 Props](#组件-props)
-    - [只写想改的字段](#只写想改的字段)
-    - [关于面板的代码体积](#关于面板的代码体积)
-    - [业务数据怎么进](#业务数据怎么进)
-    - [多路由 = 多套主题](#多路由--多套主题)
-    - [主题里的 map 字段](#主题里的-map-字段)
-  - [配置项（Options）详解](#配置项options详解)
-    - [config — 地图基础配置](#config--地图基础配置)
-    - [background — 画布背景](#background--画布背景)
-    - [camera — 相机位置](#camera--相机位置)
-    - [itemStyle — 区域样式](#itemstyle--区域样式)
-    - [label — 区域标注](#label--区域标注)
-    - [tooltip — 提示框](#tooltip--提示框)
-    - [glow — 辉光后处理](#glow--辉光后处理)
-    - [grid — 网格](#grid--网格)
-    - [foundation — 底图装饰](#foundation--底图装饰)
-    - [mirror — 镜面反射](#mirror--镜面反射)
-    - [wall — 电子围栏](#wall--电子围栏)
-    - [texture — 地图贴图](#texture--地图贴图)
-    - [side — 侧面水晶](#side--侧面水晶)
-    - [autoRotate — 自动旋转](#autorotate--自动旋转)
-    - [scene — 场景特效](#scene--场景特效)
-    - [emphasis — 高亮样式](#emphasis--高亮样式)
-    - [lineStyle / outLineStyle — 边线](#linestyle--outlinestyle--边线)
+- [功能特性](#功能特性)
+- [快速开始](#快速开始)
+  - [环境要求](#环境要求) · [安装依赖](#安装依赖) · [启动开发服务器](#启动开发服务器) · [构建生产包](#构建生产包)
+- [接入业务项目](#以本仓库为模板初始化空-git-仓库)：以本仓库为模板初始化空 Git 仓库
+- [组件使用](#组件使用)
+  - [组件 Props](#组件-props)
+  - [自定义集成：直接使用 ThreeMap 类](#核心类-threemap--所有功能都包含在该类自定义集成)
+- [主题与调参](#调参--上线主题固化)
+  - [1. 在面板里调好](#1-在面板里调好) · [2. 点「导出配置」](#2-点导出配置) · [3. 粘进项目，关掉面板](#3-粘进项目关掉面板)
+  - [只写想改的字段](#只写想改的字段) · [业务数据怎么进](#业务数据怎么进) · [多路由 = 多套主题](#多路由--多套主题) · [主题里的 map 字段](#主题里的-map-字段)
+  - [关于面板的代码体积](#关于面板的代码体积) · [主题导出示例（完整配置）](#主题导出示例完整配置)
+- [配置项（Options）详解](#配置项options详解)
+  - 基础：[config](#config--地图基础配置) · [background](#background--画布背景) · [camera](#camera--相机位置观测角度) · [grid](#grid--网格)
+  - 区域：[itemStyle](#itemstyle--区域样式) · [label](#label--区域标注) · [tooltip](#tooltip--提示框) · [emphasis](#emphasis--高亮样式) · [lineStyle / outLineStyle](#linestyle--outlinestyle--边线)
+  - 材质与特效：[glow](#glow--辉光后处理) · [foundation](#foundation--底图装饰) · [mirror](#mirror--镜面反射) · [wall](#wall--电子围栏) · [texture](#texture--地图贴图) · [side](#side--侧面水晶) · [autoRotate](#autorotate--自动旋转) · [scene](#scene--场景特效)
+- **数据与图层**
   - [数据（data）格式](#数据data格式)
-  - [Series 图层](#series-图层)
-    - [marker — 标记点](#marker--标记点)
-    - [scatter — 扩散点](#scatter--扩散点)
-    - [prism — 棱柱](#prism--棱柱)
-    - [cylinder — 圆柱](#cylinder--圆柱)
-    - [flight — 飞线](#flight--飞线)
+  - [Series 图层](#series-图层)：[marker](#marker--标记点) · [scatter](#scatter--扩散点) · [prism](#prism--棱柱) · [cylinder](#cylinder--圆柱) · [flight](#flight--飞线)
+- **事件与地图**
   - [事件 API](#事件-api)
   - [地图注册与下钻](#地图注册与下钻)
+- **项目参考**
   - [目录结构](#目录结构)
-  - [开发指南](#开发指南)
-    - [推荐 IDE](#推荐-ide)
-    - [代码格式化](#代码格式化)
-    - [新增图层](#新增图层)
-  - [依赖说明](#依赖说明)
-  - [浏览器兼容](#浏览器兼容)
-  - [License](#license)
+  - [开发指南](#开发指南)：[推荐 IDE](#推荐-ide) · [代码格式化](#代码格式化) · [新增图层](#新增图层)
+  - [依赖说明](#依赖说明) · [浏览器兼容](#浏览器兼容) · [License](#license)
 
 ---
 
@@ -94,6 +63,8 @@
 ---
 
 ## 快速开始
+
+本章节用于本地运行和构建**本调参台仓库**。如果要接入到业务项目，请直接看下一章[接入业务项目](#以本仓库为模板初始化空-git-仓库)。
 
 ### 环境要求
 
@@ -120,7 +91,129 @@ npm run build
 
 ---
 
+## 以本仓库为模板初始化空 Git 仓库
+
+这里的「空 Git 仓库」指远端刚创建、还没有代码的项目仓库；本地起点是**clone 本仓库**，不是 clone 那个空仓库。流程是：拿本仓库做底子 → 清空调参台 → 放入自己的配置 → 推到空仓库。调参仍在本仓库完成，业务项目只消费导出的配置。
+
+### 1. 远端先建空仓库
+
+在 Gogs / GitHub 上创建空仓库，拿到地址 `<业务仓库>`，先不要往里推任何代码。
+
+### 2. clone 本仓库并改 remote
+
+```sh
+git clone <本仓库地址> my-screen
+cd my-screen
+
+# 本仓库留作上游，方便以后拉组件更新
+git remote rename origin upstream
+
+# 指向刚建的空业务仓库
+git remote add origin <业务仓库地址>
+```
+
+如果你本地已经 clone 过那个空仓库，也可以反过来把模板灌进来：
+
+```sh
+git remote add template <本仓库地址>
+git fetch template
+git merge template/dev --allow-unrelated-histories
+```
+
+### 3. 清掉调参台，只留地图组件
+
+删除调参台页面与配置面板：
+
+```sh
+rm src/views/DevView.vue
+rm src/components/ThreeMap/ControlPanel.vue
+```
+
+Windows 用 `Remove-Item -LiteralPath ...`。
+
+- `src/main.ts` 保持 `createApp(App).mount("#app")`。
+- `src/App.vue` 把 `DevView` 换成你的业务根组件。
+- `src/components/ThreeMap/index.vue`：删掉 `defineAsyncComponent` 的 import、`const ControlPanel = defineAsyncComponent(() => import("./ControlPanel.vue"));` 以及模板里的 `<ControlPanel ... />` 整块。
+
+保留 `src/components/ThreeMap/` 其余文件、`src/assets/geoJson/`、`src/assets/mapTex/`、`src/assets/images/`、`src/data/410100-districts.json`。这些路径和别名模板里已经配好，不用改。
+
+### 4. 放入地图配置文件
+
+新建 `src/config/mapTheme.ts`，把调参台导出的 `map-theme.ts` 内容贴进去。导出文件只含视觉配置，不再引入业务数据文件，所有 `series.data` 均为 `[]`，业务数据由使用方自行填充。
+
+也可以手写一份最小配置：
+
+```ts
+// src/config/mapTheme.ts
+import type { ThreeMapTheme } from "@/components/ThreeMap/options/theme";
+
+const mapTheme: ThreeMapTheme = {
+  map: "410100",
+  mapName: "郑州",
+  config: { depth: 40, mapSize: 1 },
+  camera: { azimuth: 350, elevation: 62 },
+  scene: { intro: true },
+};
+
+export default mapTheme;
+```
+
+### 5. 在页面中使用
+
+以替换后的 `src/App.vue` 为例：
+
+```vue
+<script setup lang="ts">
+import ThreeMap from "@/components/ThreeMap/index.vue";
+import mapTheme from "@/config/mapTheme";
+</script>
+
+<template>
+  <div style="width: 100%; height: 100vh">
+    <ThreeMap :option="mapTheme" :panel="false" />
+  </div>
+</template>
+```
+
+`:panel="false"` 时不加载调参面板 chunk。调参时可回本仓库（或 `upstream`）把 `panel` 临时改为 `true`，导出配置后再改回 `false`。
+
+### 6. 提交到空仓库
+
+```sh
+npm install
+npm run dev
+npm run build
+git add .
+git commit -m "chore: 基于模板初始化业务大屏"
+git push -u origin HEAD:main
+```
+
+之后别人 `git clone <业务仓库>` 拿到的就是初始化好的大屏项目，不再是空仓库。
+
+### 7. 后续同步组件更新
+
+```sh
+git fetch upstream
+git merge upstream/dev
+```
+
+业务代码和模板差异变大后容易冲突，按需合并即可。
+
+---
+
 ## 组件使用
+
+### 组件 Props
+
+| 参数 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `option` | `ThreeMapTheme \| null` | `null` | 面板导出的主题，**深合并**覆盖默认值，只需写想改的字段 |
+| `panel` | `boolean` | `true` | 是否渲染调参面板。生产环境传 `false` |
+| `legend` | `boolean` | `true` | 是否渲染色阶图例（数据展示用，与面板无关） |
+| `area` | `string` | `'410100'` | 初始行政区划代码 |
+| `areaName` | `string` | `'郑州'` | 初始地图名称 |
+
+---
 
 ### 核心类 `ThreeMap` 所有功能都包含在该类（自定义集成）
 
@@ -204,16 +297,6 @@ import myTheme from "@/components/ThreeMap/options/myTheme";
 ```
 
 导出的文件里 `import` 路径是 `@/components/ThreeMap/options/theme`，如果 `ThreeMap` 目录不在 `@/components` 下，改一下这行路径即可。
-
-### 组件 Props
-
-| 参数 | 类型 | 默认值 | 说明 |
-| --- | --- | --- | --- |
-| `option` | `ThreeMapTheme \| null` | `null` | 面板导出的主题，**深合并**覆盖默认值，只需写想改的字段 |
-| `panel` | `boolean` | `true` | 是否渲染调参面板。生产环境传 `false` |
-| `legend` | `boolean` | `true` | 是否渲染色阶图例（数据展示用，与面板无关） |
-| `area` | `string` | `'410100'` | 初始行政区划代码 |
-| `areaName` | `string` | `'郑州'` | 初始地图名称 |
 
 ### 只写想改的字段
 
@@ -851,7 +934,7 @@ map.setOption({
 内置的 GeoJSON 文件位于 `src/assets/geoJson/`，以省级 adcode 命名（如 `110000.json` = 北京）。`100000.json` 为中国全图，`100000_bound.json` 为国界边界。
 
 ---
-## 导出配置
+## 主题导出示例（完整配置）
 
 ```ts
 import type { ThreeMapTheme } from "@/components/ThreeMap/options/theme";
@@ -1136,6 +1219,8 @@ import monitorTheme from "@/themes/monitor"; //主题文件
 </template>
 
 ```
+
+---
 
 ## 目录结构
 
