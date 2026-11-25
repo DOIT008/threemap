@@ -2,6 +2,25 @@ import { transformStyle } from "./helpers";
 import type { TooltipOptions, TooltipInstance, ThreeMapContext } from "../types";
 
 /**
+ * DOM 图元（marker / prism）的悬浮入口。
+ * CSS2D 节点走不了射线拾取，这里把鼠标坐标换算到 tooltip 所在容器后写进统一通道。
+ */
+export function setDomTooltip(context: ThreeMapContext, data: any, event: MouseEvent): void {
+  const rect = context.tooltipDom.parentElement?.getBoundingClientRect();
+  context.tooltipHover = {
+    data,
+    x: rect ? event.clientX - rect.left : event.offsetX,
+    y: rect ? event.clientY - rect.top : event.offsetY,
+    source: "dom",
+  };
+}
+
+/** 只清 DOM 来源，避免误清逐条飞线的射线悬浮数据 */
+export function clearDomTooltip(context: ThreeMapContext): void {
+  if (context.tooltipHover?.source === "dom") context.tooltipHover = null;
+}
+
+/**
  * 提示框渲染 - 根据当前拾取的 Mesh 更新 Tooltip 内容和位置
  *
  * 触发时机:
@@ -10,11 +29,19 @@ import type { TooltipOptions, TooltipInstance, ThreeMapContext } from "../types"
  * @this ThreeMapContext
  */
 export const tooltipRender = function (this: ThreeMapContext): void {
-  const { tooltip, mouseEvent: e, tooltipDom } = this;
+  const { tooltip, mouseEvent: e, tooltipDom, tooltipHover } = this;
 
   // 隐藏之前的 Tooltip
   if (tooltip) {
     tooltip._hide();
+  }
+
+  // DOM 图元 / 逐条飞线的悬浮数据优先级最高，避免被每帧的射线复位冲掉
+  if (tooltipHover && tooltip) {
+    tooltipDom.style.left = tooltipHover.x + 15 + "px";
+    tooltipDom.style.top = tooltipHover.y + 2 + "px";
+    tooltip._show(tooltipHover.data);
+    return;
   }
 
   // 如果拾取到分区 Mesh 且 Tooltip 开启

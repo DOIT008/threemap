@@ -10,6 +10,7 @@ import { Group } from "three";
 import markerImage from "@/assets/images/arrow.png";
 import { drawLabel } from "./drawLabel";
 import { transformPx } from "./helpers";
+import { setDomTooltip, clearDomTooltip } from "./addTooltip";
 import type { ThreeMapContext, MarkerSeriesOptions, MapConfig } from "../types";
 
 /**
@@ -118,6 +119,12 @@ export const drawMarker = function (this: ThreeMapContext, options: MarkerSeries
     marker.style.userSelect = "none";
     marker.style.pointerEvents = "auto";
     marker.style.cursor = "pointer";
+
+    // CSS2D 标记走 DOM 悬浮，不参与射线拾取
+    const hoverData = { ...it, seriesName };
+    marker.addEventListener("mouseenter", (e) => setDomTooltip(this, hoverData, e));
+    marker.addEventListener("mousemove", (e) => setDomTooltip(this, hoverData, e));
+    marker.addEventListener("mouseleave", () => clearDomTooltip(this));
 
     const markerMesh = new CSS2DObject(marker) as any;
     const { depth, scale } = config;

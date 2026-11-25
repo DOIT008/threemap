@@ -268,7 +268,8 @@ function loadMap(code: string, name: string): void {
   // demo 的地图自带一组「中心放射」飞线，默认补一条，进页面即是同款观感。
   // 主题里显式给了 series（哪怕是空数组）就以主题为准，不再补 —— 这样
   // 想做「只留底图」的极简主题，写 series: [] 即可。
-  if (!threeOptionsRef.value.series.length && !props.option?.series) {
+  const themeHasSeries = Array.isArray(props.option?.series);
+  if (!threeOptionsRef.value.series.length && !themeHasSeries) {
     const flight = createFlight();
     flight.seriesName = "flight-1";
     threeOptionsRef.value.series.push(flight);
@@ -285,11 +286,14 @@ function loadMap(code: string, name: string): void {
         mapJson: mapJson,
       });
 
-      threeOptionsRef.value.series.forEach((it: any) => {
-        if (!it.data || !it.data.length) {
-          it.data = createdDataRandom(mapJson, it.type);
-        }
-      });
+      // 主题显式给了 series 就完全尊重它：data: [] 不该被塞进随机演示数据
+      if (!themeHasSeries) {
+        threeOptionsRef.value.series.forEach((it: any) => {
+          if (!it.data || !it.data.length) {
+            it.data = createdDataRandom(mapJson, it.type);
+          }
+        });
+      }
 
       init();
       loading.value = false;

@@ -8,6 +8,7 @@
 import { CSS2DObject } from "three/examples/jsm/renderers/CSS2DRenderer.js";
 import { Group } from "three";
 import { drawLabel } from "./drawLabel";
+import { setDomTooltip, clearDomTooltip } from "./addTooltip";
 import type { ThreeMapContext, PrismSeriesOptions, MapConfig } from "../types";
 
 /**
@@ -144,6 +145,12 @@ export const drawPrism = function (this: ThreeMapContext, options: PrismSeriesOp
         break;
       }
     }
+
+    // CSS2D 棱镜走 DOM 悬浮，不参与射线拾取
+    const hoverData = { ...it, seriesName };
+    prism.addEventListener("mouseenter", (e) => setDomTooltip(this, hoverData, e));
+    prism.addEventListener("mousemove", (e) => setDomTooltip(this, hoverData, e));
+    prism.addEventListener("mouseleave", () => clearDomTooltip(this));
 
     const prismMesh = new CSS2DObject(prism) as any;
     const { depth, scale } = config;

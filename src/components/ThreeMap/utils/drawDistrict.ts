@@ -541,6 +541,9 @@ function resetDistrictEmphasis(mesh: any): void {
 /** 上一帧的鼠标指针形态，避免每帧重复写 style */
 let cursorState = '';
 
+/** 可以触发 tooltip 的图元：区域/散点/圆柱读 _privateData，飞线按面索引定位单条数据 */
+const TOOLTIP_PICK_TYPES = new Set(['district', 'scatter', 'cylinder', 'flight']);
+
 /**
  * 区域渲染（悬浮高亮）
  *
@@ -558,11 +561,14 @@ export const districtRender = function (this: ThreeMapContext): void {
     this.pickDistrictMesh = null;
   }
 
+  // DOM 悬浮由 mouseleave 清理；飞线来自射线拾取，每帧重建
+  if (this.tooltipHover?.source === 'series') this.tooltipHover = null;
+
   const intersects = raycaster.intersectObjects(scene.children, true);
-  const hits = intersects.filter((it: any) => it.object._type === 'district' || it.object._type === 'scatter');
+  const hits = intersects.filter((it: any) => TOOLTIP_PICK_TYPES.has(it.object._type));
   const picked = hits[0]?.object as any;
 
-  if (!picked || picked._type !== 'district') {
+  if (!picked) {
     if (cursorState !== '') {
       document.body.style.cursor = '';
       cursorState = '';
@@ -570,7 +576,41 @@ export const districtRender = function (this: ThreeMapContext): void {
     return;
   }
 
+  // 系列图元也要记录：tooltipRender 从它的 _privateData 读取 name / value
   this.pickDistrictMesh = hits[0]!;
+
+  // 飞线把多条曲线合并成一个 Mesh，用面索引反推命中的那条数据
+  if (picked._type === 'flight') {
+    const hit = hits[0]!;
+    const segments = (picked as any)._segments ?? 72;
+    const curveIndex = Math.floor((hit.faceIndex ?? 0) / (segments * 6));
+    const item = (picked as any)._flightData?.[curveIndex];
+    if (item && this.mouseEvent) {
+      const nameOf = (code: any) => {
+        const district = this.districtData.find((it) => it.adcode == code);
+        return district?.name ?? (Array.isArray(code) ? code.join(",") : String(code));
+      };
+      this.tooltipHover = {
+        data: {
+          ...item,
+          name: `${nameOf(item.start)} → ${nameOf(item.end)}`,
+          seriesName: (picked as any)._seriesName,
+        },
+        x: this.mouseEvent.offsetX,
+        y: this.mouseEvent.offsetY,
+        source: 'series',
+      };
+    }
+  }
+
+  // 非区域图元只参与 tooltip / 指针，不触发区域抬升与高亮
+  if (picked._type !== 'district') {
+    if (cursorState !== 'pointer') {
+      document.body.style.cursor = 'pointer';
+      cursorState = 'pointer';
+    }
+    return;
+  }
 
   const { emphasisColor, emphasisText, emphasisEnabled } = picked._privateData || {};
   if (!emphasisEnabled) {

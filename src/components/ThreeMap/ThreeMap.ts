@@ -76,6 +76,7 @@ export default class ThreeMap {
   camera: THREE.PerspectiveCamera | null;
   tooltipDom: HTMLElement;
   tooltip: TooltipInstance | null;
+  tooltipHover: { data: any; x: number; y: number; source: "dom" | "series" } | null;
 
   events: Record<string, ((data: any) => void)[]>;
   mapTextures: (THREE.Texture | null)[];
@@ -188,6 +189,7 @@ export default class ThreeMap {
     this.camera = null;
     this.tooltipDom = tooltipDom;
     this.tooltip = null;
+    this.tooltipHover = null;
 
     this.events = {};
     this.mapTextures = [];
@@ -1577,6 +1579,7 @@ export default class ThreeMap {
    * 构建 tooltip 实例并挂到当前地图上下文。
    */
   addTooltipLayer(): void {
+    this.tooltipHover = null;
     const tooltip = addTooltip.call(this as any, this.options!.tooltip);
     if (tooltip) {
       this.tooltip = tooltip;
@@ -1731,6 +1734,7 @@ export default class ThreeMap {
     this.districtData = [];
     this.el = null as any;
     this.tooltipDom = null as any;
+    this.tooltipHover = null;
     this.camera = null;
     this.pointer = null;
   }

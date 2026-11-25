@@ -61,6 +61,8 @@ export const drawFlight = function (this: ThreeMapContext, options: FlightSeries
   const arcMax = 2.0 * unit;
 
   const curves: SinArcCurve[] = [];
+  // 只保留真正生成了曲线的项，保证面索引和 tooltip 数据一一对应
+  const curveData: FlightSeriesOptions["data"] = [];
   data.forEach((it) => {
     const start = transform(it.start, this.districtData, projection);
     const end = transform(it.end, this.districtData, projection);
@@ -75,9 +77,11 @@ export const drawFlight = function (this: ThreeMapContext, options: FlightSeries
 
     const height = Math.min(Math.max(chord * arcRatio, arcMin), arcMax);
     curves.push(new SinArcCurve(a, b, height));
+    curveData.push(it);
   });
 
-  const geometry = buildFlyLineGeometry(curves, Math.max(24, Math.min(200, Math.round(points || 72))));
+  const segments = Math.max(24, Math.min(200, Math.round(points || 72)));
+  const geometry = buildFlyLineGeometry(curves, segments);
   const uniforms = createFlyLineUniforms(
     {
       color: flightColor[0] ?? '#5ea8f0',
@@ -99,9 +103,13 @@ export const drawFlight = function (this: ThreeMapContext, options: FlightSeries
     blending: THREE.AdditiveBlending,
   });
 
-  const mesh = new THREE.Mesh(geometry, material);
+  const mesh = new THREE.Mesh(geometry, material) as any;
   mesh.renderOrder = 10;
-  mesh.raycast = () => {};
+  // 开启拾取：每条曲线占 segments 段、每段 2 个三角形（6 个索引）
+  mesh._type = 'flight';
+  mesh._flightData = curveData;
+  mesh._segments = segments;
+  mesh._seriesName = options.seriesName;
   group.add(mesh);
   group._category = 'flight'; // 标记类型，render 循环里据此更新 time
   return group;

@@ -395,6 +395,8 @@ export interface ThreeMapContext {
   innerHeight: number;
   tooltipDom: HTMLElement;
   tooltip: TooltipInstance | null;
+  /** DOM 图元（marker/prism）或逐条飞线的悬浮数据，优先级高于射线拾取 */
+  tooltipHover?: { data: any; x: number; y: number; source: "dom" | "series" } | null;
   pickDistrictMesh: THREE.Intersection | null;
   mouseEvent: MouseEvent | null;
   clock: THREE.Clock;
