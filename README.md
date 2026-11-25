@@ -158,9 +158,48 @@ const mapTheme: ThreeMapTheme = {
 export default mapTheme;
 ```
 
-### 5. 在页面中使用
+### 5. 在页面路由中使用
 
-以替换后的 `src/App.vue` 为例：
+业务项目通常把地图放到某个路由页面。先安装路由：
+
+```sh
+npm i vue-router
+```
+
+新建 `src/router/index.ts`：
+
+```ts
+import { createRouter, createWebHistory } from "vue-router";
+import MapView from "@/views/MapView.vue";
+
+export default createRouter({
+  history: createWebHistory(),
+  routes: [
+    { path: "/", redirect: "/map" },
+    { path: "/map", name: "map", component: MapView },
+  ],
+});
+```
+
+`src/main.ts` 挂载路由：
+
+```ts
+import { createApp } from "vue";
+import App from "./App.vue";
+import router from "./router";
+
+createApp(App).use(router).mount("#app");
+```
+
+`src/App.vue` 只留路由出口：
+
+```vue
+<template>
+  <RouterView />
+</template>
+```
+
+`src/views/MapView.vue` 里使用地图组件：
 
 ```vue
 <script setup lang="ts">
@@ -169,7 +208,7 @@ import mapTheme from "@/config/mapTheme";
 </script>
 
 <template>
-  <div style="width: 100%; height: 100vh">
+  <div style="width: 100%; height: 100%">
     <ThreeMap :option="mapTheme" :panel="false" />
   </div>
 </template>
