@@ -10,6 +10,10 @@
  */
 import type { ThreeMapOptions, SeriesOptions } from "../types";
 
+/** 非飞线 series 统一使用的区县数据文件；飞线数据仍由使用方填 start/end */
+const DISTRICT_DATA_IMPORT = "@/data/410100-districts.json";
+const DISTRICT_DATA_TOKEN = "__THREEMAP_DISTRICT_DATA__";
+
 /** 除业务数据（data / series）外的全部渲染配置，允许只写一部分 */
 export type ThreeMapTheme = DeepPartial<Omit<ThreeMapOptions, "data" | "series">> & {
   /** 系列样式。业务数据（每条 series 里的 data）不会被导出，由使用方自己填 */
@@ -123,7 +127,7 @@ export function extractTheme(options: ThreeMapOptions): ThreeMapTheme {
   const theme = stripFunctions({ ...options, data: undefined }) as ThreeMapTheme;
   // 相机方向导出成人能读的角度（面板也是按角度调的），回填时由 resolveCameraAngles 换算回 x/y/z
   theme.camera = toCameraAngles(options.camera);
-  // 系列本身留着（样式有用），但把每条 series 的 data 清空
+  // 系列样式留着；data 一律清掉，由 themeToTS() 按类型补回共享数据引用
   const series = options.series;
   if (series && series.length) {
     theme.series = stripFunctions(series).map((item) => ({ ...item, data: [] })) as SeriesOptions[];
@@ -133,16 +137,30 @@ export function extractTheme(options: ThreeMapOptions): ThreeMapTheme {
 
 /**
  * 把主题转成一段可直接粘进项目的 TS 源码。
+ * 非飞线 series 的 data 统一改为引用 districtData；飞线 data 保持清空，由使用方填 start/end。
  * @param theme 主题对象
  * @param varName 生成的常量名
  */
 export function themeToTS(theme: ThreeMapTheme, varName = "mapTheme"): string {
-  const json = JSON.stringify(theme, null, 2)
+  const usesDistrictData = theme.series?.some((item) => item.type !== "flight") ?? false;
+  const serializable: any = {
+    ...theme,
+    series: theme.series?.map((item) => (item.type === "flight" ? item : { ...item, data: DISTRICT_DATA_TOKEN })),
+  };
+  const json = JSON.stringify(serializable, null, 2)
     // JSON 的 key 一定带引号，这里把合法的标识符解掉，贴进项目更像手写代码
-    .replace(/^(\s*)"([A-Za-z_$][\w$]*)":/gm, "$1$2:");
+    .replace(/^(\s*)"([A-Za-z_$][\w$]*)":/gm, "$1$2:")
+    .replace(new RegExp(`"${DISTRICT_DATA_TOKEN}"`, "g"), "districtData");
+
+  const districtImport = usesDistrictData
+    ? `import districtData from "${DISTRICT_DATA_IMPORT}";
+
+// 非飞线 series 共用区县数据；飞线数据自行填 start/end
+`
+    : "";
 
   return `import type { ThreeMapTheme } from "@/components/ThreeMap/options/theme";
-
+${districtImport}
 /**
  * 由控制面板导出的地图主题。
  * 用法：<ThreeMap :option="${varName}" :panel="false" />
