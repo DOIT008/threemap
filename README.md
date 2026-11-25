@@ -101,8 +101,10 @@ npm run build
 
 ### 2. clone 本仓库并改 remote
 
+> 本仓库最新代码在 **`dev`** 分支。Gogs 仓库默认 `HEAD` 可能还指向 `master`（不存在），直接 clone 会出现 `warning: remote HEAD refers to nonexistent ref, unable to checkout`，工作区是空的。所以这里显式用 `-b dev`。
+
 ```sh
-git clone <本仓库地址> my-screen
+git clone -b dev <本仓库地址> my-screen
 cd my-screen
 
 # 本仓库留作上游，方便以后拉组件更新
@@ -112,12 +114,19 @@ git remote rename origin upstream
 git remote add origin <业务仓库地址>
 ```
 
+如果你已经 clone 过但工作区是空的，不用重来，执行：
+
+```sh
+git switch -c dev origin/dev
+# 若已把 origin 改名为 upstream：git switch -c dev upstream/dev
+```
+
 如果你本地已经 clone 过那个空仓库，也可以反过来把模板灌进来：
 
 ```sh
 git remote add template <本仓库地址>
 git fetch template
-git merge template/dev --allow-unrelated-histories
+git switch -c dev template/dev
 ```
 
 ### 3. 清掉调参台，只留地图组件
