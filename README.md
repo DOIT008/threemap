@@ -863,6 +863,7 @@ map.setOption({
 
 ```ts
 import type { ThreeMapTheme } from "@/components/ThreeMap/options/theme";
+import districtData from "@/data/410100-districts.json";
 
 /**
  * 由控制面板导出的地图主题。
@@ -1109,7 +1110,7 @@ const mapTheme: ThreeMapTheme = {
   // ========== 附加系列：这里只保留样式，data 导出时被清空 ==========
   series: [
     {
-      type: "flight", // 图层类型：flight = 飞线
+      type: "flight", // 图层类型：flight = 飞线，如果是其他类型data有数据
       seriesName: "flight-1", // 系列名称，用于区分多个 series
       points: 72, // 每条弧线的采样段数
       flightLen: 50, // 飞行流光的长度（粒子数量），决定可见窗口大小
@@ -1119,7 +1120,8 @@ const mapTheme: ThreeMapTheme = {
         "#e6f6ff" // 头部高光
       ],
       headSize: 1, // 头部粒子放大系数，用于强调飞行方向
-      data: [] // 导出时清空；自行填充 { start, end }，支持 adcode 或 [lng, lat]
+      // data: [] // 导出时清空；自行填充 { start, end }，支持 adcode 或 [lng, lat]
+      data:districtData// 其他类型数据
     }
   ]
 };

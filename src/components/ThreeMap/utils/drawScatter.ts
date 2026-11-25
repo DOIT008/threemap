@@ -31,8 +31,11 @@ export const drawScatter = function (this: ThreeMapContext, options: ScatterSeri
   const seriesName = options.seriesName;
   const data = options.data || [];
   const scatterGroup = new THREE.Group() as any;
-  const { depth, scale } = config;
-  const z = (depth + 1) / scale;
+  const { scale } = config;
+  // 贴在区县顶面上方一点：(depth + 1) / scale 是旧的投影平面高度，
+  // 和现在按地图宽度换算出来的实际顶面高度不一致，点会埋进区县里拾取不到。
+  const surfaceTop = this.mapDepth ?? config.depth / scale;
+  const z = surfaceTop + (this.mapWorldWidth || 10) * 0.004;
   let { spotColor, spotSize, spotSizeFormatter, spotSeparate, ringColor, ringRatio, ringSeparate, offset, label } = options;
 
   const spotFormat = tinycolor(spotColor);
@@ -111,14 +114,22 @@ export const drawScatter = function (this: ThreeMapContext, options: ScatterSeri
     ringMesh._scale = 1; // 初始缩放值,用于动画更新
     ringMesh.renderOrder = 85; // 渲染顺序优先级
 
+    // 悬浮数据：补上系列名，跟 marker / flight 的 tooltip 数据保持一致
+    const hoverData = { ...it, seriesName };
+
+    // 可见的涟漪环也要能被射线拾取，否则鼠标落在环上时只会拾到下面的区县，
+    // 看起来就是「散点没有 tooltip」。
+    ringMesh._privateData = hoverData;
+    ringMesh._type = "scatter";
+
     // 将涓漪环附加到中心点上
     spotMesh.add(ringMesh);
 
-    spotMesh._privateData = it; // 存储原始数据
+    spotMesh._privateData = hoverData; // 存储原始数据
     spotMesh._type = "scatter";
 
     if (label.show) {
-      const labelDom = drawLabel(label, it);
+      const labelDom = drawLabel(label, hoverData);
       const labelMesh = new CSS2DObject(labelDom) as any;
       labelMesh._type = "label";
       spotMesh.add(labelMesh);

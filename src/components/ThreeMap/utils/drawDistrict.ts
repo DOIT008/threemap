@@ -566,7 +566,14 @@ export const districtRender = function (this: ThreeMapContext): void {
 
   const intersects = raycaster.intersectObjects(scene.children, true);
   const hits = intersects.filter((it: any) => TOOLTIP_PICK_TYPES.has(it.object._type));
-  const picked = hits[0]?.object as any;
+  // 区县悬浮时会抬升到 1.5 倍厚度，盖住贴在顶面的散点/光柱。
+  // 射线会同时命中抬起的区县和它下面的系列图元，此时优先取近处的系列图元，
+  // 否则散点的 tooltip 会被区县抢走，且区县一直保持抬起、点再也拾不到。
+  // 距离限制避免把射线远处无关的点误当成鼠标下的目标。
+  const nearLimit = (this.mapDepth ?? 1) * 1.5;
+  const seriesHit = hits.find((it: any) => it.object._type !== 'district' && it.distance - (hits[0]?.distance ?? 0) <= nearLimit);
+  const hit = seriesHit ?? hits[0];
+  const picked = hit?.object as any;
 
   if (!picked) {
     if (cursorState !== '') {
@@ -577,13 +584,12 @@ export const districtRender = function (this: ThreeMapContext): void {
   }
 
   // 系列图元也要记录：tooltipRender 从它的 _privateData 读取 name / value
-  this.pickDistrictMesh = hits[0]!;
+  this.pickDistrictMesh = hit!;
 
   // 飞线把多条曲线合并成一个 Mesh，用面索引反推命中的那条数据
   if (picked._type === 'flight') {
-    const hit = hits[0]!;
     const segments = (picked as any)._segments ?? 72;
-    const curveIndex = Math.floor((hit.faceIndex ?? 0) / (segments * 6));
+    const curveIndex = Math.floor((hit!.faceIndex ?? 0) / (segments * 6));
     const item = (picked as any)._flightData?.[curveIndex];
     if (item && this.mouseEvent) {
       const nameOf = (code: any) => {
